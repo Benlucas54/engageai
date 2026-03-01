@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { NAV_ITEMS } from "@/lib/constants";
 import { useComments } from "@/hooks/useComments";
 import { useAgentStatus } from "@/hooks/useAgentStatus";
 import { timeAgo } from "@/utils/timeAgo";
+import { getSupabase } from "@/lib/supabase";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { comments } = useComments();
   const agentRun = useAgentStatus();
 
@@ -87,6 +89,20 @@ export function Sidebar() {
           <br />
           Instagram · Threads · X
         </div>
+      </div>
+
+      {/* Logout */}
+      <div className="px-3 pb-4">
+        <button
+          onClick={async () => {
+            await getSupabase().auth.signOut();
+            router.push("/login");
+            router.refresh();
+          }}
+          className="w-full flex items-center px-3 py-[9px] rounded-[7px] text-[11px] text-content-faint bg-transparent border-0 cursor-pointer font-sans"
+        >
+          Sign out
+        </button>
       </div>
     </div>
   );

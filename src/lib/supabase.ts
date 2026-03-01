@@ -1,6 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 
-let _client: ReturnType<typeof createClient> | null = null;
+let _client: ReturnType<typeof createBrowserClient> | null = null;
 
 export function getSupabase() {
   if (!_client) {
@@ -8,13 +8,12 @@ export function getSupabase() {
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !key) {
       console.warn("Supabase env vars not set — data features disabled");
-      // Return a noop client that won't crash the UI
-      _client = createClient(
+      _client = createBrowserClient(
         "https://placeholder.supabase.co",
         "placeholder"
       );
     } else {
-      _client = createClient(url, key);
+      _client = createBrowserClient(url, key);
     }
   }
   return _client;

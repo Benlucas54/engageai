@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { DM_Sans, Playfair_Display } from "next/font/google";
-import { Sidebar } from "@/components/dashboard/Sidebar";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -28,13 +27,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${dmSans.variable} ${playfair.variable}`}>
-      <body className="flex min-h-screen bg-surface font-sans text-content">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[760px] mx-auto px-12 pt-12 pb-24">
-            {children}
-          </div>
-        </main>
+      <body className="min-h-screen bg-surface font-sans text-content">
+        {children}
       </body>
     </html>
   );
