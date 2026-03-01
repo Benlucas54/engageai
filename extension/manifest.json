@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "EngageAI",
+  "version": "0.1.0",
+  "description": "AI-powered social media reply assistant",
+  "permissions": ["activeTab", "storage", "alarms", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://www.threads.net/*",
+    "https://x.com/*",
+    "https://www.linkedin.com/*"
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "public/icons/16.png",
+      "48": "public/icons/48.png",
+      "128": "public/icons/128.png"
+    }
+  },
+  "icons": {
+    "16": "public/icons/16.png",
+    "48": "public/icons/48.png",
+    "128": "public/icons/128.png"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["src/content-scripts/instagram.ts"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.threads.net/*"],
+      "js": ["src/content-scripts/threads.ts"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://x.com/*"],
+      "js": ["src/content-scripts/x.ts"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["src/content-scripts/linkedin.ts"],
+      "run_at": "document_idle"
+    }
+  ]
+}
