@@ -3,6 +3,7 @@ interface BtnProps {
   onClick?: () => void;
   variant?: "primary" | "secondary" | "ghost";
   size?: "sm" | "md";
+  disabled?: boolean;
 }
 
 const VARIANT_STYLES = {
@@ -16,11 +17,12 @@ const SIZE_STYLES = {
   md: "py-2 px-[18px] text-xs",
 };
 
-export function Btn({ children, onClick, variant = "primary", size = "md" }: BtnProps) {
+export function Btn({ children, onClick, variant = "primary", size = "md", disabled = false }: BtnProps) {
   return (
     <button
       onClick={onClick}
-      className={`${VARIANT_STYLES[variant]} ${SIZE_STYLES[size]} border rounded-md font-medium cursor-pointer font-sans tracking-[0.02em] whitespace-nowrap`}
+      disabled={disabled}
+      className={`${VARIANT_STYLES[variant]} ${SIZE_STYLES[size]} border rounded-md font-medium cursor-pointer font-sans tracking-[0.02em] whitespace-nowrap ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       {children}
     </button>

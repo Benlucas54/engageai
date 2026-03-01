@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useComments } from "@/hooks/useComments";
 import { useAgentStatus } from "@/hooks/useAgentStatus";
@@ -14,6 +15,31 @@ import { Divider } from "@/components/ui/Divider";
 export function OverviewView() {
   const { comments } = useComments();
   const agentRun = useAgentStatus();
+  const [runState, setRunState] = useState<"idle" | "starting" | "running">("idle");
+
+  const isAgentRunning = agentRun?.status === "running";
+
+  // Sync local state with real-time agent status
+  useEffect(() => {
+    if (runState === "starting" && isAgentRunning) {
+      setRunState("running");
+    }
+    if (runState === "running" && !isAgentRunning) {
+      setRunState("idle");
+    }
+  }, [isAgentRunning, runState]);
+
+  const handleRunNow = useCallback(async () => {
+    if (runState !== "idle" || isAgentRunning) return;
+    setRunState("starting");
+    try {
+      const res = await fetch("/api/run-now", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start agent");
+      setRunState("running");
+    } catch {
+      setRunState("idle");
+    }
+  }, [runState, isAgentRunning]);
 
   const replied = comments.filter((c) => c.status === "replied").length;
   const flagged = comments.filter((c) => c.status === "flagged").length;
@@ -28,7 +54,28 @@ export function OverviewView() {
 
   return (
     <div className="flex flex-col gap-3.5">
-      {/* Stat cards */}
+      {/* Agent run + Stat cards */}
+      <div className="flex items-center justify-between">
+        <MiniLabel>
+          {isAgentRunning
+            ? `Agent running — started ${timeAgo(agentRun.started_at)}`
+            : agentRun?.completed_at
+              ? `Last run ${timeAgo(agentRun.completed_at)}`
+              : "Agent has not run yet"}
+        </MiniLabel>
+        <Btn
+          size="sm"
+          onClick={handleRunNow}
+          disabled={runState !== "idle" || isAgentRunning}
+        >
+          {runState === "starting"
+            ? "Starting…"
+            : isAgentRunning
+              ? "Running…"
+              : "Run Now"}
+        </Btn>
+      </div>
+
       <div className="grid grid-cols-3 gap-2.5">
         {[
           { label: "Total today", val: comments.length, tag: null },

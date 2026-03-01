@@ -19,9 +19,11 @@ export function useAgentStatus() {
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 60_000);
+    // Poll every 5s while running, every 60s otherwise
+    const ms = run?.status === "running" ? 5_000 : 60_000;
+    const interval = setInterval(fetchStatus, ms);
     return () => clearInterval(interval);
-  }, [fetchStatus]);
+  }, [fetchStatus, run?.status]);
 
   return run;
 }
