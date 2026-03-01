@@ -90,13 +90,14 @@ ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE linked_accounts ENABLE ROW LEVEL SECURITY;
 
--- Comments: anon can SELECT, can UPDATE only flagged→hidden
+-- Comments: anon can SELECT, INSERT, UPDATE
 CREATE POLICY "comments_select" ON comments FOR SELECT TO anon USING (true);
-CREATE POLICY "comments_update_dismiss" ON comments FOR UPDATE TO anon
-  USING (status = 'flagged') WITH CHECK (status = 'hidden');
+CREATE POLICY "comments_insert" ON comments FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "comments_update" ON comments FOR UPDATE TO anon USING (true);
 
--- Replies: anon can SELECT, UPDATE (draft edits + approvals)
+-- Replies: anon can SELECT, INSERT, UPDATE
 CREATE POLICY "replies_select" ON replies FOR SELECT TO anon USING (true);
+CREATE POLICY "replies_insert" ON replies FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "replies_update" ON replies FOR UPDATE TO anon USING (true);
 
 -- Voice settings: anon can SELECT, UPDATE, INSERT

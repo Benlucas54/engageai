@@ -159,6 +159,7 @@ function ScanTab() {
   const [error, setError] = useState<string | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
+  const [hasScanned, setHasScanned] = useState(false);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
@@ -178,7 +179,13 @@ function ScanTab() {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
     setScanning(false);
+    setHasScanned(true);
   }, []);
+
+  // Auto-scan when popup opens
+  useEffect(() => {
+    handleScan();
+  }, [handleScan]);
 
   const handleApprove = async (result: ScanResult, text?: string) => {
     if (!result.reply) return;
@@ -250,7 +257,9 @@ function ScanTab() {
             padding: "24px 0",
           }}
         >
-          Navigate to a social media post and click "Scan this page"
+          {hasScanned
+            ? "No new comments found"
+            : 'Navigate to a social media post and click "Scan this page"'}
         </div>
       )}
 
@@ -855,10 +864,10 @@ export default function App() {
         ))}
       </div>
 
-      {/* Tab content */}
-      {tab === "scan" && <ScanTab />}
-      {tab === "queue" && <QueueTab />}
-      {tab === "settings" && <SettingsTab />}
+      {/* Tab content — use display:none to preserve state across tab switches */}
+      <div style={{ display: tab === "scan" ? "block" : "none" }}><ScanTab /></div>
+      <div style={{ display: tab === "queue" ? "block" : "none" }}><QueueTab /></div>
+      <div style={{ display: tab === "settings" ? "block" : "none" }}><SettingsTab /></div>
     </div>
   );
 }

@@ -71,6 +71,7 @@ export interface ScanResult {
 export interface ContentScriptMessage {
   action: "SCRAPE" | "POST_REPLY";
   payload?: QueuedReply;
+  ownerUsername?: string;
 }
 
 export interface ContentScriptResponse {

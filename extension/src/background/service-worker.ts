@@ -33,7 +33,7 @@ function isSpam(text: string): boolean {
 
 function detectPlatform(url: string): Platform | null {
   if (url.includes("instagram.com")) return "instagram";
-  if (url.includes("threads.net")) return "threads";
+  if (url.includes("threads.net") || url.includes("threads.com")) return "threads";
   if (url.includes("x.com")) return "x";
   if (url.includes("linkedin.com")) return "linkedin";
   return null;
@@ -45,10 +45,12 @@ async function deduplicateComments(
   const sevenDaysAgo = new Date(
     Date.now() - 7 * 24 * 60 * 60 * 1000
   ).toISOString();
-  const { data: existing } = await supabase
+  const { data: existing, error: dedupErr } = await supabase
     .from("comments")
     .select("platform, username, comment_text")
     .gte("synced_at", sevenDaysAgo);
+
+  console.log(`[EngageAI] Dedup: ${existing?.length ?? 0} existing comments in DB, error:`, dedupErr?.message);
 
   const existingKeys = new Set(
     (existing || []).map(
@@ -94,17 +96,88 @@ async function handleScrape(
   tabId: number,
   platform: Platform
 ): Promise<ScanResult[]> {
-  // Send scrape message to content script
-  const response = await chrome.tabs.sendMessage(tabId, { action: "SCRAPE" });
+  // Look up owner username from linked_accounts
+  let ownerUsername = "";
+  const { data: account } = await supabase
+    .from("linked_accounts")
+    .select("username")
+    .eq("platform", platform === "threads" ? "threads" : platform)
+    .limit(1)
+    .single();
+  if (account?.username) {
+    ownerUsername = account.username.replace(/^@/, "");
+  }
+  // Fallback: for threads, try instagram account
+  if (!ownerUsername && platform === "threads") {
+    const { data: igAccount } = await supabase
+      .from("linked_accounts")
+      .select("username")
+      .eq("platform", "instagram")
+      .limit(1)
+      .single();
+    if (igAccount?.username) {
+      ownerUsername = igAccount.username.replace(/^@/, "");
+    }
+  }
+
+  // Send scrape message to content script with owner username
+  const response = await chrome.tabs.sendMessage(tabId, {
+    action: "SCRAPE",
+    ownerUsername,
+  });
   if (!response?.success || !response.comments?.length) {
     return [];
   }
 
   const scraped: ScrapedComment[] = response.comments;
+  console.log(`[EngageAI] Scraped ${scraped.length} comments from content script`);
 
   // Deduplicate against Supabase
   const newComments = await deduplicateComments(scraped);
-  if (newComments.length === 0) return [];
+  console.log(`[EngageAI] After dedup: ${newComments.length} new comments`);
+
+  if (newComments.length === 0) {
+    // All comments already in DB — surface only ones from THIS scan that need attention
+    const scrapedKeys = new Set(
+      scraped.map((c) => `${c.username}:${c.comment_text}`)
+    );
+
+    const { data: existing, error: existingErr } = await supabase
+      .from("comments")
+      .select("*")
+      .eq("platform", platform)
+      .in("status", ["pending", "flagged"])
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    console.log(`[EngageAI] Pending/flagged in DB:`, existing?.length ?? 0, "error:", existingErr?.message);
+
+    // Only show comments that were on the current page
+    const matched = (existing || []).filter((c) =>
+      scrapedKeys.has(`${c.username}:${c.comment_text}`)
+    );
+
+    console.log(`[EngageAI] Matched to current scan:`, matched.length);
+
+    if (matched.length > 0) {
+      const results: ScanResult[] = [];
+      for (const comment of matched) {
+        const { data: reply } = await supabase
+          .from("replies")
+          .select("*")
+          .eq("comment_id", comment.id)
+          .limit(1)
+          .single();
+        results.push({
+          comment,
+          reply: reply || undefined,
+          status: comment.status === "flagged" ? "flagged" : "auto-approved",
+        });
+      }
+      return results;
+    }
+    return [];
+  }
 
   // Get voice settings for reply generation
   const { voice, docContext } = await getVoiceWithDocuments();
@@ -136,7 +209,11 @@ async function handleScrape(
       .select()
       .single();
 
-    if (error || !inserted) continue;
+    if (error || !inserted) {
+      console.error(`[EngageAI] Insert failed for @${comment.username}:`, error?.message);
+      continue;
+    }
+    console.log(`[EngageAI] Inserted comment ${inserted.id} from @${comment.username}`);
 
     // Generate reply
     try {
