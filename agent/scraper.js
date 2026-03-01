@@ -72,6 +72,17 @@ export async function scrapeAll() {
   const newComments = await deduplicateComments(allComments);
   console.log(`${newComments.length} new comments after deduplication`);
 
+  // Build set of usernames the owner has already replied to
+  const { data: repliedRows } = await supabase
+    .from("comments")
+    .select("username, replies(sent_at, draft_text)")
+    .not("replies", "is", null);
+  const ownerRepliedUsernames = new Set(
+    (repliedRows || [])
+      .filter(c => c.replies?.some(r => r.sent_at && !r.draft_text))
+      .map(c => c.username)
+  );
+
   // Insert with spam detection
   const inserted = [];
   for (const comment of newComments) {
@@ -81,14 +92,33 @@ export async function scrapeAll() {
         ? "flagged"
         : "pending";
 
-    const { forceFlag, ...commentData } = comment;
+    const { forceFlag, ownerReply, ownerReplyTimestamp, ...commentData } = comment;
+
+    // Owner-replied comments or comments from users already replied to go in as "replied"
+    const finalStatus = ownerReply || ownerRepliedUsernames.has(comment.username)
+      ? "replied"
+      : status;
+
     const { data, error } = await supabase
       .from("comments")
-      .insert({ ...commentData, status })
+      .insert({ ...commentData, status: finalStatus })
       .select()
       .single();
 
-    if (data) inserted.push(data);
+    if (data) {
+      inserted.push(data);
+
+      // Insert the owner's reply into the replies table
+      if (ownerReply) {
+        const { error: replyErr } = await supabase.from("replies").insert({
+          comment_id: data.id,
+          reply_text: ownerReply,
+          approved: true,
+          sent_at: ownerReplyTimestamp || new Date().toISOString(),
+        });
+        if (replyErr) console.error(`Error inserting owner reply:`, replyErr.message);
+      }
+    }
     if (error) console.error(`Error inserting comment:`, error.message);
   }
 

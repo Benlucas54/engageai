@@ -24,7 +24,14 @@ export function Sidebar() {
   const { comments } = useComments();
   const agentRun = useAgentStatus();
 
-  const flagCount = comments.filter((c) => c.status === "flagged").length;
+  const repliedUsernames = new Set(
+    comments
+      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
+      .map((c) => c.username),
+  );
+  const flagCount = comments.filter(
+    (c) => c.status === "flagged" && !repliedUsernames.has(c.username),
+  ).length;
 
   const statusColor = agentRun
     ? agentRun.status === "success"

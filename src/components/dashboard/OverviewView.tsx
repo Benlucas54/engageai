@@ -41,8 +41,15 @@ export function OverviewView() {
     }
   }, [runState, isAgentRunning]);
 
+  const repliedUsernames = new Set(
+    comments
+      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
+      .map((c) => c.username),
+  );
   const replied = comments.filter((c) => c.status === "replied").length;
-  const flagged = comments.filter((c) => c.status === "flagged").length;
+  const flagged = comments.filter(
+    (c) => c.status === "flagged" && !repliedUsernames.has(c.username),
+  ).length;
 
   const platforms = (["instagram", "threads", "x"] as const).map((p) => {
     const total = comments.filter((c) => c.platform === p).length;

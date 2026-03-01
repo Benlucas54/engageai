@@ -11,7 +11,9 @@ interface CommentCardProps {
 }
 
 export function CommentCard({ comment: c, compact }: CommentCardProps) {
-  const reply = c.replies?.[0]?.reply_text;
+  const replyRow = c.replies?.[0];
+  const reply = replyRow?.reply_text;
+  const isOwnerReply = replyRow?.sent_at && !replyRow?.draft_text;
 
   return (
     <Card className={compact ? "!px-3.5 !py-3" : ""}>
@@ -47,7 +49,7 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
       </p>
       {reply && (
         <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
-          <MiniLabel>EngageAI reply</MiniLabel>
+          <MiniLabel>{isOwnerReply ? "Your reply" : "EngageAI reply"}</MiniLabel>
           <p className="mt-1.5 mb-0 text-[13px] text-content-sub leading-[1.65]">
             {reply}
           </p>

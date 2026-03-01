@@ -66,6 +66,7 @@ export function detectFlagCondition(comment, voice) {
   const text = comment.comment_text.toLowerCase();
   const threshold = voice.auto_threshold;
 
+  if (threshold === "none") return true;
   if (threshold === "all") return false;
 
   const pricingKeywords = ["price", "pricing", "cost", "how much", "investment", "roi", "worth it", "afford", "pay", "fee", "rate"];

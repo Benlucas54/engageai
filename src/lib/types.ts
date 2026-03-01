@@ -28,7 +28,7 @@ export interface VoiceSettings {
   signature_phrases: string;
   avoid: string;
   signoff: string;
-  auto_threshold: "simple" | "most" | "all";
+  auto_threshold: "none" | "simple" | "most" | "all";
 }
 
 export interface VoiceFormData {
@@ -37,7 +37,7 @@ export interface VoiceFormData {
   phrases: string;
   avoid: string;
   signoff: string;
-  threshold: "simple" | "most" | "all";
+  threshold: "none" | "simple" | "most" | "all";
 }
 
 export interface AgentRun {

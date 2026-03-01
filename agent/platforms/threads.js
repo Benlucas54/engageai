@@ -160,16 +160,29 @@ export async function scrapeComments() {
           }
         );
 
+        // Separate owner replies from user comments
+        const ownerUsername = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
+        let lastUserComment = null;
         for (const c of postComments) {
-          comments.push({
-            platform: "threads",
-            username: c.username,
-            comment_text: c.text,
-            post_title: postText,
-            post_url: postUrl,
-            comment_external_id: `th:${c.username}:${[...c.text].slice(0, 30).join("")}`,
-            created_at: c.timestamp,
-          });
+          if (ownerUsername && c.username.toLowerCase() === ownerUsername.toLowerCase()) {
+            // Attach as reply to previous user comment
+            if (lastUserComment) {
+              lastUserComment.ownerReply = c.text;
+              lastUserComment.ownerReplyTimestamp = c.timestamp;
+            }
+          } else {
+            const entry = {
+              platform: "threads",
+              username: c.username,
+              comment_text: c.text,
+              post_title: postText,
+              post_url: postUrl,
+              comment_external_id: `th:${c.username}:${[...c.text].slice(0, 30).join("")}`,
+              created_at: c.timestamp,
+            };
+            comments.push(entry);
+            lastUserComment = entry;
+          }
         }
       } catch (err) {
         console.error(`Error scraping Threads post ${postUrl}:`, err.message);

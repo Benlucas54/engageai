@@ -17,8 +17,15 @@ export function FlaggedView() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [done, setDone] = useState<FlaggedComment[]>([]);
 
+  // Usernames where the owner has already replied to at least one of their comments
+  const repliedUsernames = new Set(
+    comments
+      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
+      .map((c) => c.username)
+  );
+
   const flagged: FlaggedComment[] = comments
-    .filter((c) => c.status === "flagged")
+    .filter((c) => c.status === "flagged" && !repliedUsernames.has(c.username))
     .map((c) => ({
       ...c,
       draft:

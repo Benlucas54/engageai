@@ -102,6 +102,11 @@ export function VoiceView() {
         <div className="mt-[18px] flex flex-col gap-2.5">
           {[
             {
+              val: "none" as const,
+              label: "Flag all",
+              desc: "Draft replies for you to review & approve",
+            },
+            {
               val: "simple" as const,
               label: "Simple only",
               desc: "Compliments, thanks, reactions",

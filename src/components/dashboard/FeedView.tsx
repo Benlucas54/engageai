@@ -36,8 +36,17 @@ export function FeedView() {
     return () => setWide(false);
   }, [view, setWide]);
 
+  const repliedUsernames = new Set(
+    comments
+      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
+      .map((c) => c.username),
+  );
   const filtered =
-    filter === "all" ? comments : comments.filter((c) => c.status === filter);
+    filter === "all"
+      ? comments
+      : filter === "flagged"
+        ? comments.filter((c) => c.status === "flagged" && !repliedUsernames.has(c.username))
+        : comments.filter((c) => c.status === filter);
 
   const togglePlatform = (p: string) => {
     setVisiblePlatforms((prev) => {
