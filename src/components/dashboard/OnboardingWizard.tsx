@@ -6,7 +6,7 @@ import { P_LABEL } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { Btn } from "@/components/ui/Btn";
 
-type Draft = { platform: "instagram" | "threads" | "x"; username: string; enabled: boolean };
+type Draft = { platform: "instagram" | "threads" | "x" | "linkedin"; username: string; enabled: boolean };
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (

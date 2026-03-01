@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLinkedAccounts } from "@/hooks/useLinkedAccounts";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OnboardingWizard } from "@/components/dashboard/OnboardingWizard";
+import { LayoutProvider, useLayout } from "@/contexts/LayoutContext";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -34,13 +35,26 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-[760px] mx-auto px-12 pt-12 pb-24">
-          {children}
-        </div>
-      </main>
-    </div>
+    <LayoutProvider>
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <MainContent>{children}</MainContent>
+      </div>
+    </LayoutProvider>
+  );
+}
+
+function MainContent({ children }: { children: React.ReactNode }) {
+  const { wide } = useLayout();
+  return (
+    <main className="flex-1 overflow-y-auto">
+      <div
+        className={`mx-auto pt-12 pb-24 ${
+          wide ? "max-w-full px-8" : "max-w-[760px] px-12"
+        }`}
+      >
+        {children}
+      </div>
+    </main>
   );
 }
