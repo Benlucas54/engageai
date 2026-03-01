@@ -1,6 +1,9 @@
 node_modules/
 dist/
+.next/
+out/
 .env
+.env.local
 .cookies/
 *.log
 .DS_Store
