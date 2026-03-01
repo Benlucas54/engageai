@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 const COOKIES_PATH = path.join(process.cwd(), ".cookies", "instagram.json");
-const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 function randomDelay(min = 3000, max = 5000) {
   return new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
@@ -29,36 +29,67 @@ async function saveCookies(context) {
   fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
 }
 
+async function dismissCookieConsent(page) {
+  const names = [
+    "Allow all cookies",
+    "Decline optional cookies",
+    "Allow essential and optional cookies",
+    "Accept",
+    "Only allow essential cookies",
+  ];
+  for (const name of names) {
+    try {
+      const btn = page.getByRole("button", { name });
+      if (await btn.isVisible({ timeout: 2000 })) {
+        await btn.click();
+        await randomDelay(1000, 2000);
+        return;
+      }
+    } catch {}
+  }
+}
+
 async function login(page) {
-  const username = process.env.INSTAGRAM_USERNAME;
+  const username = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
   const password = process.env.INSTAGRAM_PASSWORD;
   if (!username || !password) throw new Error("Instagram credentials not set in .env");
 
-  await page.goto("https://www.instagram.com/accounts/login/", { waitUntil: "networkidle" });
+  await page.goto("https://www.instagram.com/accounts/login/", { waitUntil: "domcontentloaded" });
   await randomDelay(2000, 3000);
 
-  await page.fill('input[name="username"]', username);
-  await page.fill('input[name="password"]', password);
-  await randomDelay(500, 1000);
-  await page.click('button[type="submit"]');
+  await dismissCookieConsent(page);
 
-  await page.waitForURL("**/instagram.com/**", { timeout: 30_000 });
+  await page.fill('input[name="email"]', username);
+  await page.fill('input[name="pass"]', password);
+  await randomDelay(500, 1000);
+  await page.getByRole("button", { name: "Log in" }).first().click();
+
+  // Wait for navigation away from login page (Instagram uses SPA navigation)
+  await page.waitForFunction(
+    () => !window.location.pathname.includes("/accounts/login"),
+    { timeout: 30_000 }
+  );
   await randomDelay(2000, 4000);
 
   // Handle "Save login info?" prompt
-  const saveBtn = await page.$('button:has-text("Save Info"), button:has-text("Save info")');
-  if (saveBtn) await saveBtn.click();
+  try {
+    const saveBtn = page.getByRole("button", { name: "Save info" });
+    if (await saveBtn.isVisible({ timeout: 3000 })) await saveBtn.click();
+  } catch {}
   await randomDelay(1000, 2000);
 
   // Handle notifications prompt
-  const notNowBtn = await page.$('button:has-text("Not Now"), button:has-text("not now")');
-  if (notNowBtn) await notNowBtn.click();
+  try {
+    const notNowBtn = page.getByRole("button", { name: "Not now" });
+    if (await notNowBtn.isVisible({ timeout: 3000 })) await notNowBtn.click();
+  } catch {}
   await randomDelay(1000, 2000);
 }
 
 async function isLoggedIn(page) {
-  await page.goto("https://www.instagram.com/", { waitUntil: "networkidle" });
+  await page.goto("https://www.instagram.com/", { waitUntil: "domcontentloaded" });
   await randomDelay(2000, 3000);
+  await dismissCookieConsent(page);
   // Check if we're redirected to login
   return !page.url().includes("/accounts/login");
 }
@@ -76,8 +107,8 @@ export async function scrapeComments() {
       await saveCookies(context);
     }
 
-    const username = process.env.INSTAGRAM_USERNAME;
-    await page.goto(`https://www.instagram.com/${username}/`, { waitUntil: "networkidle" });
+    const username = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
+    await page.goto(`https://www.instagram.com/${username}/`, { waitUntil: "domcontentloaded" });
     await randomDelay(3000, 5000);
 
     // Get recent post links (first 6)
@@ -89,7 +120,7 @@ export async function scrapeComments() {
 
     for (const postUrl of postLinks) {
       try {
-        await page.goto(postUrl, { waitUntil: "networkidle" });
+        await page.goto(postUrl, { waitUntil: "domcontentloaded" });
         await randomDelay(3000, 5000);
 
         // Get post caption for title
@@ -157,7 +188,7 @@ export async function postReply(commentData, replyText) {
       await saveCookies(context);
     }
 
-    await page.goto(commentData.post_url, { waitUntil: "networkidle" });
+    await page.goto(commentData.post_url, { waitUntil: "domcontentloaded" });
     await randomDelay(3000, 5000);
 
     // Find the comment and click reply

@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 
 const COOKIES_PATH = path.join(process.cwd(), ".cookies", "threads.json");
-const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 function randomDelay(min = 3000, max = 5000) {
   return new Promise(r => setTimeout(r, min + Math.random() * (max - min)));
@@ -29,32 +29,54 @@ async function saveCookies(context) {
   fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
 }
 
+async function dismissCookieConsent(page) {
+  const names = [
+    "Allow all cookies",
+    "Decline optional cookies",
+    "Allow essential and optional cookies",
+    "Accept",
+    "Only allow essential cookies",
+  ];
+  for (const name of names) {
+    try {
+      const btn = page.getByRole("button", { name });
+      if (await btn.isVisible({ timeout: 2000 })) {
+        await btn.click();
+        await randomDelay(1000, 2000);
+        return;
+      }
+    } catch {}
+  }
+}
+
 async function login(page) {
   // Threads uses Instagram login
-  const username = process.env.INSTAGRAM_USERNAME;
+  const username = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
   const password = process.env.INSTAGRAM_PASSWORD;
   if (!username || !password) throw new Error("Instagram credentials not set in .env (used for Threads login)");
 
   await page.goto("https://www.threads.net/login", { waitUntil: "networkidle" });
   await randomDelay(2000, 3000);
 
+  await dismissCookieConsent(page);
+
   // Threads may redirect to Instagram login
   if (page.url().includes("instagram.com")) {
-    await page.fill('input[name="username"]', username);
-    await page.fill('input[name="password"]', password);
+    await dismissCookieConsent(page);
+    await page.fill('input[name="email"]', username);
+    await page.fill('input[name="pass"]', password);
     await randomDelay(500, 1000);
-    await page.click('button[type="submit"]');
+    await page.getByRole("button", { name: "Log in" }).first().click();
     await page.waitForURL("**/{threads,instagram}.{net,com}/**", { timeout: 30_000 });
   } else {
     // Direct Threads login
-    const usernameInput = await page.$('input[type="text"], input[name="username"]');
-    const passwordInput = await page.$('input[type="password"]');
+    const usernameInput = await page.$('input[type="text"], input[name="email"]');
+    const passwordInput = await page.$('input[type="password"], input[name="pass"]');
     if (usernameInput && passwordInput) {
       await usernameInput.fill(username);
       await passwordInput.fill(password);
       await randomDelay(500, 1000);
-      const loginBtn = await page.$('button[type="submit"], div[role="button"]:has-text("Log in")');
-      if (loginBtn) await loginBtn.click();
+      await page.getByRole("button", { name: "Log in" }).first().click();
       await randomDelay(3000, 5000);
     }
   }
@@ -70,6 +92,7 @@ async function login(page) {
 async function isLoggedIn(page) {
   await page.goto("https://www.threads.net/", { waitUntil: "networkidle" });
   await randomDelay(2000, 3000);
+  await dismissCookieConsent(page);
   return !page.url().includes("/login");
 }
 
@@ -86,7 +109,7 @@ export async function scrapeComments() {
       await saveCookies(context);
     }
 
-    const username = process.env.INSTAGRAM_USERNAME;
+    const username = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
     await page.goto(`https://www.threads.net/@${username}`, { waitUntil: "networkidle" });
     await randomDelay(3000, 5000);
 
