@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS voice_documents (
   uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS linked_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'x', 'linkedin')),
+  username TEXT NOT NULL DEFAULT '',
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ============================================================
 -- INDEXES
 -- ============================================================
@@ -68,6 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_comments_platform ON comments(platform);
 CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_replies_comment_id ON replies(comment_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at ON agent_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_linked_accounts_platform ON linked_accounts(platform);
 
 -- ============================================================
 -- ROW LEVEL SECURITY
@@ -78,6 +88,7 @@ ALTER TABLE replies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE linked_accounts ENABLE ROW LEVEL SECURITY;
 
 -- Comments: anon can SELECT, can UPDATE only flagged→hidden
 CREATE POLICY "comments_select" ON comments FOR SELECT TO anon USING (true);
@@ -95,6 +106,11 @@ CREATE POLICY "voice_settings_insert" ON voice_settings FOR INSERT TO anon WITH 
 
 -- Agent runs: anon can SELECT only
 CREATE POLICY "agent_runs_select" ON agent_runs FOR SELECT TO anon USING (true);
+
+-- Linked accounts: anon can SELECT, INSERT, UPDATE
+CREATE POLICY "linked_accounts_select" ON linked_accounts FOR SELECT TO anon USING (true);
+CREATE POLICY "linked_accounts_insert" ON linked_accounts FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "linked_accounts_update" ON linked_accounts FOR UPDATE TO anon USING (true);
 
 -- Voice documents: anon can SELECT, INSERT, DELETE
 CREATE POLICY "voice_documents_select" ON voice_documents FOR SELECT TO anon USING (true);

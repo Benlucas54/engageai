@@ -34,13 +34,26 @@ async function deduplicateComments(comments) {
 
 export async function scrapeAll() {
   const allComments = [];
-  const scrapers = [
+  const allScrapers = [
     { name: "instagram", fn: scrapeInstagram },
     { name: "threads",   fn: scrapeThreads },
     { name: "x",         fn: scrapeX },
+    // LinkedIn scraper not yet implemented — entry here so it's
+    // recognized as a valid platform; will be skipped if fn is null.
+    { name: "linkedin",  fn: null },
   ];
 
+  // Only scrape enabled platforms (fall back to all if no rows exist)
+  const { data: linkedAccounts } = await supabase
+    .from("linked_accounts")
+    .select("platform, enabled");
+
+  const scrapers = linkedAccounts && linkedAccounts.length > 0
+    ? allScrapers.filter(s => linkedAccounts.some(a => a.platform === s.name && a.enabled))
+    : allScrapers;
+
   for (const { name, fn } of scrapers) {
+    if (!fn) continue;
     try {
       console.log(`Scraping ${name}...`);
       const comments = await fn();

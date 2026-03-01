@@ -238,7 +238,7 @@ export function VoiceView() {
       <Card>
         <MiniLabel>Active platforms</MiniLabel>
         <div className="mt-3.5 flex gap-2 flex-wrap">
-          {(["instagram", "threads", "x"] as const).map((p) => (
+          {(["instagram", "threads", "x", "linkedin"] as const).map((p) => (
             <Tag key={p} type={p}>
               {P_LABEL[p]} · Active
             </Tag>

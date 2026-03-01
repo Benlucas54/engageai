@@ -62,6 +62,15 @@ export interface VoiceDocument {
   uploaded_at: string;
 }
 
+export interface LinkedAccount {
+  id: string;
+  platform: "instagram" | "threads" | "x" | "linkedin";
+  username: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FlaggedComment extends Comment {
   draft: string;
   replyId: string | undefined;

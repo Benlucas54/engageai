@@ -4,6 +4,7 @@ export const P_LABEL: Record<string, string> = {
   instagram: "Instagram",
   threads: "Threads",
   x: "X",
+  linkedin: "LinkedIn",
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -11,6 +12,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "Feed",     icon: "\u2261", href: "/feed" },
   { id: "Flagged",  icon: "\u25C7", href: "/flagged", alert: true },
   { id: "Voice",    icon: "\u25C8", href: "/voice" },
+  { id: "Settings", icon: "\u2699", href: "/settings" },
 ];
 
 export const TAG_STYLES: Record<string, string> = {
@@ -21,4 +23,5 @@ export const TAG_STYLES: Record<string, string> = {
   instagram: "bg-tag-instagram-bg text-tag-instagram-text border border-tag-instagram-border",
   threads:   "bg-tag-threads-bg text-tag-threads-text border border-tag-threads-border",
   x:         "bg-tag-x-bg text-tag-x-text border border-tag-x-border",
+  linkedin:  "bg-tag-threads-bg text-tag-threads-text border border-tag-threads-border",
 };
