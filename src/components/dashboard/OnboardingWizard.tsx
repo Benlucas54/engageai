@@ -52,19 +52,25 @@ export function OnboardingWizard({
 
   const finish = async (navigateTo?: string) => {
     setSaving(true);
-    // Insert rows with the user's data directly
-    await getSupabase()
-      .from("linked_accounts")
-      .insert(
-        drafts.map((d) => ({
-          platform: d.platform,
-          username: d.username,
-          enabled: d.enabled,
-        }))
-      );
+    try {
+      const { error } = await getSupabase()
+        .from("linked_accounts")
+        .insert(
+          drafts.map((d) => ({
+            platform: d.platform,
+            username: d.username,
+            enabled: d.enabled,
+          }))
+        );
 
-    // Tell the shell to refetch (+ where to navigate)
-    await onComplete(navigateTo);
+      if (error) throw error;
+
+      // Tell the shell to refetch (+ where to navigate)
+      await onComplete(navigateTo);
+    } catch (err) {
+      console.error("Failed to save linked accounts:", err);
+      setSaving(false);
+    }
   };
 
   return (
@@ -133,7 +139,7 @@ export function OnboardingWizard({
             </p>
 
             <div className="flex flex-col gap-3">
-              <Btn onClick={() => finish("/voice")}>
+              <Btn onClick={() => finish("/voice")} disabled={saving}>
                 {saving ? "Saving..." : "Go to Voice settings"}
               </Btn>
               <button
