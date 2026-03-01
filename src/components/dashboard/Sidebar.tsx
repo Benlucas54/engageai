@@ -6,11 +6,21 @@ import { NAV_ITEMS } from "@/lib/constants";
 import { useComments } from "@/hooks/useComments";
 import { useAgentStatus } from "@/hooks/useAgentStatus";
 import { timeAgo } from "@/utils/timeAgo";
+import { useState, useEffect } from "react";
 import { getSupabase } from "@/lib/supabase";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSupabase()
+      .auth.getUser()
+      .then(({ data }: { data: { user: { email?: string | null } | null } }) =>
+        setEmail(data.user?.email ?? null),
+      );
+  }, []);
   const { comments } = useComments();
   const agentRun = useAgentStatus();
 
@@ -91,15 +101,23 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Logout */}
-      <div className="px-3 pb-4">
+      {/* Profile / Sign out */}
+      <div className="px-3 pb-4 group relative">
+        <div className="flex items-center gap-2.5 px-3 py-[9px] rounded-[7px] cursor-default">
+          <div className="w-6 h-6 rounded-full bg-content-xfaint text-content text-[11px] font-semibold flex items-center justify-center shrink-0 uppercase">
+            {email ? email[0] : "?"}
+          </div>
+          <span className="text-[11px] text-content-faint truncate">
+            {email ?? "Loading..."}
+          </span>
+        </div>
         <button
           onClick={async () => {
             await getSupabase().auth.signOut();
             router.push("/login");
             router.refresh();
           }}
-          className="w-full flex items-center px-3 py-[9px] rounded-[7px] text-[11px] text-content-faint bg-transparent border-0 cursor-pointer font-sans"
+          className="hidden group-hover:block absolute bottom-full left-3 mb-1 px-3 py-[7px] rounded-[7px] text-[11px] text-content-faint bg-surface-sidebar border border-border-light cursor-pointer font-sans whitespace-nowrap"
         >
           Sign out
         </button>
