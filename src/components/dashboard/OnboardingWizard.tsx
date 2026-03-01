@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { getSupabase } from "@/lib/supabase";
 import { P_LABEL } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { Btn } from "@/components/ui/Btn";
@@ -52,25 +51,24 @@ export function OnboardingWizard({
 
   const finish = async (navigateTo?: string) => {
     setSaving(true);
-    try {
-      const { error } = await getSupabase()
-        .from("linked_accounts")
-        .insert(
-          drafts.map((d) => ({
-            platform: d.platform,
-            username: d.username,
-            enabled: d.enabled,
-          }))
-        );
+    const res = await fetch("/api/linked-accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        drafts.map((d) => ({
+          platform: d.platform,
+          username: d.username,
+          enabled: d.enabled,
+        }))
+      ),
+    });
 
-      if (error) throw error;
-
-      // Tell the shell to refetch (+ where to navigate)
-      await onComplete(navigateTo);
-    } catch (err) {
-      console.error("Failed to save linked accounts:", err);
+    if (!res.ok) {
       setSaving(false);
+      return;
     }
+
+    await onComplete(navigateTo);
   };
 
   return (
