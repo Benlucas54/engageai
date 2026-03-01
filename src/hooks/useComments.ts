@@ -8,11 +8,11 @@ export function useComments() {
   const [comments, setComments] = useState<Comment[]>([]);
 
   const fetchComments = useCallback(async () => {
-    const { data } = await getSupabase()
-      .from("comments")
-      .select("*, replies(*)")
-      .order("created_at", { ascending: false });
-    if (data) setComments(data as Comment[]);
+    const res = await globalThis.fetch("/api/comments");
+    if (res.ok) {
+      const data = await res.json();
+      if (data) setComments(data as Comment[]);
+    }
   }, []);
 
   useEffect(() => {

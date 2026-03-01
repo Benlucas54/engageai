@@ -8,11 +8,11 @@ export function useVoiceDocuments() {
   const [files, setFiles] = useState<VoiceDocument[]>([]);
 
   const fetchFiles = useCallback(async () => {
-    const { data } = await getSupabase()
-      .from("voice_documents")
-      .select("*")
-      .order("uploaded_at", { ascending: false });
-    if (data) setFiles(data as VoiceDocument[]);
+    const res = await fetch("/api/voice-documents");
+    if (res.ok) {
+      const data = await res.json();
+      if (data) setFiles(data as VoiceDocument[]);
+    }
   }, []);
 
   useEffect(() => {
@@ -25,18 +25,25 @@ export function useVoiceDocuments() {
       .from("voice-documents")
       .upload(path, file);
     if (uploadErr) return;
-    await getSupabase().from("voice_documents").insert({
-      file_name: file.name,
-      file_size: file.size,
-      file_type: file.name.endsWith(".pdf") ? "pdf" : "txt",
-      storage_path: path,
-    } as never);
+    await fetch("/api/voice-documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        file_name: file.name,
+        file_size: file.size,
+        file_type: file.name.endsWith(".pdf") ? "pdf" : "txt",
+        storage_path: path,
+      }),
+    });
     fetchFiles();
   }, [fetchFiles]);
 
   const remove = useCallback(async (doc: VoiceDocument) => {
-    await getSupabase().storage.from("voice-documents").remove([doc.storage_path]);
-    await getSupabase().from("voice_documents").delete().eq("id", doc.id);
+    await fetch("/api/voice-documents", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: doc.id, storage_path: doc.storage_path }),
+    });
     fetchFiles();
   }, [fetchFiles]);
 

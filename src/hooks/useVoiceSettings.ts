@@ -1,20 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getSupabase } from "@/lib/supabase";
 import type { VoiceFormData } from "@/lib/types";
 
 export function useVoiceSettings() {
   const [voice, setVoice] = useState<VoiceFormData | null>(null);
 
   const fetchVoice = useCallback(async () => {
-    const { data } = await getSupabase()
-      .from("voice_settings")
-      .select("*")
-      .limit(1)
-      .single();
-    if (data) {
-      const d = data as Record<string, string>;
+    const res = await fetch("/api/voice");
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d) {
       setVoice({
         id: d.id,
         tone: d.tone,
@@ -31,16 +27,18 @@ export function useVoiceSettings() {
   }, [fetchVoice]);
 
   const save = useCallback(async (v: VoiceFormData) => {
-    await getSupabase()
-      .from("voice_settings")
-      .update({
+    await fetch("/api/voice", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: v.id,
         tone: v.tone,
         signature_phrases: v.phrases,
         avoid: v.avoid,
         signoff: v.signoff,
         auto_threshold: v.threshold,
-      } as never)
-      .eq("id", v.id);
+      }),
+    });
   }, []);
 
   return { voice, save, refetch: fetchVoice };
