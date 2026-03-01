@@ -27,9 +27,13 @@ async function deduplicateComments(comments) {
     (existing || []).map(c => `${c.platform}:${c.username}:${c.comment_text}`)
   );
 
-  return comments.filter(c =>
-    !existingKeys.has(`${c.platform}:${c.username}:${c.comment_text}`)
-  );
+  const seen = new Set();
+  return comments.filter(c => {
+    const key = `${c.platform}:${c.username}:${c.comment_text}`;
+    if (existingKeys.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function scrapeAll() {

@@ -55,7 +55,7 @@ async function login(page) {
   const password = process.env.INSTAGRAM_PASSWORD;
   if (!username || !password) throw new Error("Instagram credentials not set in .env (used for Threads login)");
 
-  await page.goto("https://www.threads.net/login", { waitUntil: "networkidle" });
+  await page.goto("https://www.threads.net/login", { waitUntil: "domcontentloaded" });
   await randomDelay(2000, 3000);
 
   await dismissCookieConsent(page);
@@ -90,7 +90,7 @@ async function login(page) {
 }
 
 async function isLoggedIn(page) {
-  await page.goto("https://www.threads.net/", { waitUntil: "networkidle" });
+  await page.goto("https://www.threads.net/", { waitUntil: "domcontentloaded" });
   await randomDelay(2000, 3000);
   await dismissCookieConsent(page);
   return !page.url().includes("/login");
@@ -110,19 +110,20 @@ export async function scrapeComments() {
     }
 
     const username = process.env.INSTAGRAM_USERNAME?.replace(/^@/, "");
-    await page.goto(`https://www.threads.net/@${username}`, { waitUntil: "networkidle" });
+    await page.goto(`https://www.threads.net/@${username}`, { waitUntil: "domcontentloaded" });
     await randomDelay(3000, 5000);
 
     // Get recent thread post links (first 6)
+    // Normalize URLs to strip /media suffix to avoid scraping the same post twice
     const postLinks = await page.$$eval('a[href*="/post/"]', links =>
-      [...new Set(links.map(a => a.href))].slice(0, 6)
+      [...new Set(links.map(a => a.href.replace(/\/(media|replies)\/?$/, "")))].slice(0, 6)
     );
 
     const comments = [];
 
     for (const postUrl of postLinks) {
       try {
-        await page.goto(postUrl, { waitUntil: "networkidle" });
+        await page.goto(postUrl, { waitUntil: "domcontentloaded" });
         await randomDelay(3000, 5000);
 
         // Get the original post text as title
@@ -137,12 +138,22 @@ export async function scrapeComments() {
           (elements) => {
             // Skip the first element (the original post)
             return elements.slice(1).map(el => {
-              const usernameEl = el.querySelector('a[href*="/@"] span, span[class*="username"]');
-              const textEl = el.querySelector('div[class*="text"] span, span[dir="auto"]');
+              const spans = el.querySelectorAll('span[dir="auto"]');
+              // spans order: [username, timeAgo, commentText, ...]
+              // Author replies: [username, timeAgo, "·", "Author", commentText, ...]
+              const username = spans[0]?.textContent?.trim() || "";
               const timeEl = el.querySelector('time');
+              let text = "";
+              for (let i = 2; i < spans.length; i++) {
+                const t = spans[i]?.textContent?.trim();
+                if (t && t !== "·" && t !== "Author" && !/^\d+$/.test(t)) {
+                  text = t;
+                  break;
+                }
+              }
               return {
-                username: usernameEl?.textContent?.trim().replace("@", "") || "",
-                text: textEl?.textContent?.trim() || "",
+                username: username.replace("@", ""),
+                text,
                 timestamp: timeEl?.getAttribute("datetime") || new Date().toISOString(),
               };
             }).filter(c => c.username && c.text);
@@ -156,7 +167,7 @@ export async function scrapeComments() {
             comment_text: c.text,
             post_title: postText,
             post_url: postUrl,
-            comment_external_id: `th:${c.username}:${c.text.slice(0, 30)}`,
+            comment_external_id: `th:${c.username}:${[...c.text].slice(0, 30).join("")}`,
             created_at: c.timestamp,
           });
         }
@@ -187,7 +198,7 @@ export async function postReply(commentData, replyText) {
       await saveCookies(context);
     }
 
-    await page.goto(commentData.post_url, { waitUntil: "networkidle" });
+    await page.goto(commentData.post_url, { waitUntil: "domcontentloaded" });
     await randomDelay(3000, 5000);
 
     // Find the reply input area

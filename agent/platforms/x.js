@@ -114,7 +114,7 @@ export async function scrapeComments() {
       comment_text: c.text,
       post_title: c.text.slice(0, 50),
       post_url: c.postUrl,
-      comment_external_id: `x:${c.username}:${c.text.slice(0, 30)}`,
+      comment_external_id: `x:${c.username}:${[...c.text].slice(0, 30).join("")}`,
       created_at: c.timestamp,
       forceFlag: true, // Signal to scraper.js that this should always be flagged
     }));

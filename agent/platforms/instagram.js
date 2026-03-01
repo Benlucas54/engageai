@@ -157,7 +157,7 @@ export async function scrapeComments() {
             comment_text: c.text,
             post_title: caption,
             post_url: postUrl,
-            comment_external_id: `ig:${c.username}:${c.text.slice(0, 30)}`,
+            comment_external_id: `ig:${c.username}:${[...c.text].slice(0, 30).join("")}`,
             created_at: c.timestamp,
           });
         }
