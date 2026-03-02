@@ -26,6 +26,6 @@ export const config = {
      * - /_next (Next.js internals)
      * - Static files (favicon, images, etc.)
      */
-    "/((?!login|auth/callback|api/telegram|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!$|login|auth/callback|api/telegram|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
