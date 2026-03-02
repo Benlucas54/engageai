@@ -18,6 +18,7 @@ export function useVoiceSettings() {
         avoid: d.avoid,
         signoff: d.signoff,
         threshold: d.auto_threshold as VoiceFormData["threshold"],
+        platform_tones: d.platform_tones || {},
       });
     }
   }, []);
@@ -37,6 +38,7 @@ export function useVoiceSettings() {
         avoid: v.avoid,
         signoff: v.signoff,
         auto_threshold: v.threshold,
+        platform_tones: v.platform_tones,
       }),
     });
   }, []);

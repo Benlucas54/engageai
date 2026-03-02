@@ -5,7 +5,7 @@ import { P_LABEL } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { Btn } from "@/components/ui/Btn";
 
-type Draft = { platform: "instagram" | "threads" | "x" | "linkedin"; username: string; enabled: boolean };
+type Draft = { platform: "instagram" | "threads" | "x" | "linkedin" | "tiktok" | "youtube"; username: string; enabled: boolean };
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -36,6 +36,8 @@ export function OnboardingWizard({
     { platform: "threads", username: "", enabled: true },
     { platform: "x", username: "", enabled: true },
     { platform: "linkedin", username: "", enabled: true },
+    { platform: "tiktok", username: "", enabled: true },
+    { platform: "youtube", username: "", enabled: true },
   ]);
 
   const update = (platform: string, patch: Partial<Draft>) =>

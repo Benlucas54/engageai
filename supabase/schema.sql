@@ -5,9 +5,15 @@
 -- TABLES
 -- ============================================================
 
+CREATE TABLE IF NOT EXISTS waitlist (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS comments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'x')),
+  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'x', 'linkedin', 'tiktok', 'youtube')),
   username TEXT NOT NULL,
   comment_text TEXT NOT NULL,
   post_title TEXT,
@@ -24,7 +30,9 @@ CREATE TABLE IF NOT EXISTS replies (
   reply_text TEXT,
   draft_text TEXT,
   approved BOOLEAN NOT NULL DEFAULT false,
+  auto_sent BOOLEAN NOT NULL DEFAULT false,
   sent_at TIMESTAMPTZ,
+  send_step TEXT DEFAULT NULL,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -34,7 +42,8 @@ CREATE TABLE IF NOT EXISTS voice_settings (
   signature_phrases TEXT NOT NULL DEFAULT '',
   avoid TEXT NOT NULL DEFAULT '',
   signoff TEXT NOT NULL DEFAULT '',
-  auto_threshold TEXT NOT NULL DEFAULT 'simple' CHECK (auto_threshold IN ('simple', 'most', 'all'))
+  auto_threshold TEXT NOT NULL DEFAULT 'simple' CHECK (auto_threshold IN ('simple', 'most', 'all')),
+  platform_tones JSONB NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS agent_runs (
@@ -61,11 +70,33 @@ CREATE TABLE IF NOT EXISTS voice_documents (
 
 CREATE TABLE IF NOT EXISTS linked_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'x', 'linkedin')),
+  platform TEXT NOT NULL CHECK (platform IN ('instagram', 'threads', 'x', 'linkedin', 'tiktok', 'youtube')),
   username TEXT NOT NULL DEFAULT '',
   enabled BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS voice_examples (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform TEXT,
+  comment_text TEXT NOT NULL,
+  reply_text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'learned')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS commenter_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  platform TEXT NOT NULL CHECK (platform IN ('instagram','threads','x','linkedin','tiktok','youtube')),
+  username TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  topics TEXT[] NOT NULL DEFAULT '{}',
+  comment_count INTEGER NOT NULL DEFAULT 0,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_analyzed_at TIMESTAMPTZ,
+  UNIQUE(platform, username)
 );
 
 -- ============================================================
@@ -78,6 +109,9 @@ CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_replies_comment_id ON replies(comment_id);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_started_at ON agent_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_linked_accounts_platform ON linked_accounts(platform);
+CREATE INDEX IF NOT EXISTS idx_voice_examples_source ON voice_examples(source);
+CREATE INDEX IF NOT EXISTS idx_commenter_profiles_lookup
+  ON commenter_profiles(platform, username);
 
 -- ============================================================
 -- ROW LEVEL SECURITY
@@ -89,6 +123,8 @@ ALTER TABLE voice_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE linked_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE voice_examples ENABLE ROW LEVEL SECURITY;
+ALTER TABLE commenter_profiles ENABLE ROW LEVEL SECURITY;
 
 -- Comments: anon can SELECT, INSERT, UPDATE
 CREATE POLICY "comments_select" ON comments FOR SELECT TO anon USING (true);
@@ -113,6 +149,16 @@ CREATE POLICY "linked_accounts_select" ON linked_accounts FOR SELECT TO anon USI
 CREATE POLICY "linked_accounts_insert" ON linked_accounts FOR INSERT TO anon WITH CHECK (true);
 CREATE POLICY "linked_accounts_update" ON linked_accounts FOR UPDATE TO anon USING (true);
 
+-- Commenter profiles: anon can SELECT, INSERT, UPDATE
+CREATE POLICY "commenter_profiles_select" ON commenter_profiles FOR SELECT TO anon USING (true);
+CREATE POLICY "commenter_profiles_insert" ON commenter_profiles FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "commenter_profiles_update" ON commenter_profiles FOR UPDATE TO anon USING (true);
+
+-- Voice examples: anon can SELECT, INSERT, DELETE
+CREATE POLICY "voice_examples_select" ON voice_examples FOR SELECT TO anon USING (true);
+CREATE POLICY "voice_examples_insert" ON voice_examples FOR INSERT TO anon WITH CHECK (true);
+CREATE POLICY "voice_examples_delete" ON voice_examples FOR DELETE TO anon USING (true);
+
 -- Voice documents: anon can SELECT, INSERT, DELETE
 CREATE POLICY "voice_documents_select" ON voice_documents FOR SELECT TO anon USING (true);
 CREATE POLICY "voice_documents_insert" ON voice_documents FOR INSERT TO anon WITH CHECK (true);
@@ -123,13 +169,14 @@ CREATE POLICY "voice_documents_delete" ON voice_documents FOR DELETE TO anon USI
 -- ============================================================
 
 -- Singleton voice_settings row with defaults matching the dashboard mock
-INSERT INTO voice_settings (tone, signature_phrases, avoid, signoff, auto_threshold)
+INSERT INTO voice_settings (tone, signature_phrases, avoid, signoff, auto_threshold, platform_tones)
 VALUES (
   'Warm and direct. Encouraging without being over the top. No corporate speak — sound like a person, not a brand.',
   E'\U0001F64C \U0001F525 \U0001F499 — use naturally. ''Means a lot'', ''genuinely'', ''let''s figure it out''.',
   E'''Great question!'' / ''Absolutely!'' / ''Of course!'' — too salesy. No hollow affirmations.',
   'Use first names. Keep it short. Don''t wrap up too neatly.',
-  'simple'
+  'simple',
+  '{}'
 );
 
 -- Seed test comments matching the original 7 mock comments

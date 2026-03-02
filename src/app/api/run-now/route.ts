@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { spawn } from "child_process";
 import { createServerClient } from "@/lib/supabase-server";
 
 export async function POST() {
   const supabase = createServerClient();
+
+  // Mark any currently running agent as completed
+  await supabase
+    .from("agent_runs")
+    .update({ status: "success", completed_at: new Date().toISOString() } as never)
+    .eq("status", "running");
 
   const { data, error } = await supabase
     .from("agent_runs")
@@ -15,13 +20,6 @@ export async function POST() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Spawn agent as detached child process — returns immediately.
-  // Uses `npm run agent:once` to avoid Turbopack resolving file paths at build time.
-  spawn("npm", ["run", "agent:once"], {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: "ignore",
-  }).unref();
-
+  // The Chrome extension polls agent_runs and handles scraping
   return NextResponse.json(data);
 }

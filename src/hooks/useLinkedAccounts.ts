@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { LinkedAccount } from "@/lib/types";
 
-const PLATFORMS = ["instagram", "threads", "x"] as const;
+const PLATFORMS = ["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const;
 
 export function useLinkedAccounts() {
   const [accounts, setAccounts] = useState<LinkedAccount[]>([]);

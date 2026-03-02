@@ -22,11 +22,11 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { id, tone, signature_phrases, avoid, signoff, auto_threshold } = body;
+  const { id, tone, signature_phrases, avoid, signoff, auto_threshold, platform_tones } = body;
 
   const { data, error } = await supabase
     .from("voice_settings")
-    .update({ tone, signature_phrases, avoid, signoff, auto_threshold } as never)
+    .update({ tone, signature_phrases, avoid, signoff, auto_threshold, platform_tones: platform_tones || {} } as never)
     .eq("id", id)
     .select()
     .single();

@@ -1,4 +1,4 @@
-export type Platform = "instagram" | "threads" | "x" | "linkedin";
+export type Platform = "instagram" | "threads" | "x" | "linkedin" | "tiktok" | "youtube";
 
 export interface ScrapedComment {
   platform: Platform;
@@ -30,6 +30,7 @@ export interface Reply {
   draft_text: string | null;
   approved: boolean;
   sent_at: string | null;
+  send_step: string | null;
   generated_at: string;
 }
 
@@ -40,6 +41,16 @@ export interface VoiceSettings {
   avoid: string;
   signoff: string;
   auto_threshold: "none" | "simple" | "most" | "all";
+  platform_tones: Record<string, string>;
+}
+
+export interface VoiceExample {
+  id: string;
+  platform: Platform | null;
+  comment_text: string;
+  reply_text: string;
+  source: "manual" | "learned";
+  created_at: string;
 }
 
 export interface QueuedReply {
@@ -60,6 +71,7 @@ export interface ExtensionSettings {
   auto_threshold: "none" | "simple" | "most" | "all";
   active_platforms: Platform[];
   jitter_minutes: number;
+  scan_interval_minutes: number;
 }
 
 export interface ScanResult {
@@ -77,6 +89,18 @@ export interface ContentScriptMessage {
 export interface EngagedComment {
   username: string;
   comment_text: string;
+}
+
+export interface CommenterProfile {
+  id: string;
+  platform: Platform;
+  username: string;
+  summary: string;
+  topics: string[];
+  comment_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_analyzed_at: string | null;
 }
 
 export interface ContentScriptResponse {

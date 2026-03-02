@@ -30,6 +30,10 @@ function scrape(): ScrapedComment[] {
 
     if (!username || !text) continue;
 
+    // Extract timestamp from <time datetime="...">
+    const timeEl = el.querySelector("time[datetime]");
+    const created_at = timeEl?.getAttribute("datetime") || new Date().toISOString();
+
     comments.push({
       platform: "x",
       username,
@@ -37,7 +41,7 @@ function scrape(): ScrapedComment[] {
       post_title: "X Post",
       post_url: postUrl,
       comment_external_id: `x:${username}:${[...text].slice(0, 30).join("")}`,
-      created_at: new Date().toISOString(),
+      created_at,
     });
   }
 

@@ -32,6 +32,16 @@ const TAG_COLORS: Record<string, { bg: string; text: string; border: string }> =
       text: "#3a5e8c",
       border: "#c5d5f0",
     },
+    tiktok: {
+      bg: "#f0f0f0",
+      text: "#1a1a1a",
+      border: "#d0d0d0",
+    },
+    youtube: {
+      bg: "#fdf0f0",
+      text: "#8c2020",
+      border: "#f0c5c5",
+    },
     pending: {
       bg: "#f0f7fd",
       text: "#3a6e8c",
@@ -160,6 +170,7 @@ function ScanTab() {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [hasScanned, setHasScanned] = useState(false);
+  const [showAll, setShowAll] = useState(false);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
@@ -217,8 +228,55 @@ function ScanTab() {
   return (
     <div style={{ padding: "16px" }}>
       {platform && (
-        <div style={{ marginBottom: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
           <Tag label={platform} color={platform} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0",
+              backgroundColor: "#f0eeeb",
+              borderRadius: "6px",
+              padding: "2px",
+              fontSize: "11px",
+              fontWeight: 500,
+            }}
+          >
+            <button
+              onClick={() => setShowAll(false)}
+              style={{
+                padding: "3px 10px",
+                borderRadius: "4px",
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: "11px",
+                fontWeight: 500,
+                backgroundColor: !showAll ? "#ffffff" : "transparent",
+                color: !showAll ? "#1c1917" : "#78746e",
+                boxShadow: !showAll ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              Inbox
+            </button>
+            <button
+              onClick={() => setShowAll(true)}
+              style={{
+                padding: "3px 10px",
+                borderRadius: "4px",
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: "11px",
+                fontWeight: 500,
+                backgroundColor: showAll ? "#ffffff" : "transparent",
+                color: showAll ? "#1c1917" : "#78746e",
+                boxShadow: showAll ? "0 1px 2px rgba(0,0,0,0.08)" : "none",
+              }}
+            >
+              All
+            </button>
+          </div>
         </div>
       )}
 
@@ -229,7 +287,7 @@ function ScanTab() {
         disabled={scanning}
         style={{ width: "100%", marginBottom: "16px" }}
       >
-        {scanning ? "Scanning..." : "Scan this page"}
+        {scanning ? "Scanning..." : "Scan"}
       </Btn>
 
       {error && (
@@ -248,7 +306,13 @@ function ScanTab() {
         </div>
       )}
 
-      {results.length === 0 && !scanning && !error && (
+      {(() => {
+        const filtered = showAll
+          ? results
+          : results.filter((r) => r.comment.status === "pending" || r.comment.status === "flagged");
+        return (
+          <>
+      {filtered.length === 0 && !scanning && !error && (
         <div
           style={{
             color: "#78746e",
@@ -263,168 +327,273 @@ function ScanTab() {
         </div>
       )}
 
-      {results.map((result, idx) => (
-        <div
-          key={result.comment.id}
-          style={{
-            backgroundColor: "#ffffff",
-            border: "1px solid #e9e6e0",
-            borderRadius: "8px",
-            padding: "12px",
-            marginBottom: "10px",
-          }}
-        >
+      {filtered.map((result, idx) => {
+        const cStatus = result.comment.status;
+        const isSent = cStatus === "replied" && result.reply?.sent_at;
+        const isActionable = result.status === "flagged" && result.reply;
+        const tagLabel = isSent ? "replied" : cStatus === "flagged" ? "inbox" : cStatus === "pending" ? "pending" : cStatus;
+        const tagColor = isSent ? "replied" : cStatus === "flagged" ? "flagged" : cStatus === "pending" ? "pending" : "replied";
+
+        return (
           <div
+            key={result.comment.id}
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "8px",
+              backgroundColor: "#ffffff",
+              border: "1px solid #e9e6e0",
+              borderRadius: "8px",
+              padding: "12px",
+              marginBottom: "10px",
+              opacity: isSent ? 0.7 : 1,
             }}
           >
-            <span
-              style={{
-                fontWeight: 600,
-                fontSize: "12px",
-                color: "#1c1917",
-              }}
-            >
-              @{result.comment.username}
-            </span>
-            <Tag label={result.status === "flagged" ? "inbox" : result.status} color={result.status === "auto-approved" ? "replied" : result.status} />
-          </div>
-
-          <p
-            style={{
-              fontSize: "12px",
-              color: "#1c1917",
-              marginBottom: "8px",
-              lineHeight: "1.4",
-            }}
-          >
-            {result.comment.comment_text}
-          </p>
-
-          {result.reply && (
-            <div
-              style={{
-                backgroundColor: "#f7f6f3",
-                borderRadius: "6px",
-                padding: "8px 10px",
-                marginBottom: "8px",
-              }}
-            >
-              <p
-                style={{
-                  fontSize: "11px",
-                  color: "#78746e",
-                  marginBottom: "4px",
-                  fontWeight: 500,
-                }}
-              >
-                Draft reply:
-              </p>
-              {editingIdx === idx ? (
-                <textarea
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
-                  style={{
-                    width: "100%",
-                    fontSize: "12px",
-                    border: "1px solid #e9e6e0",
-                    borderRadius: "4px",
-                    padding: "6px",
-                    resize: "vertical",
-                    minHeight: "50px",
-                    fontFamily: "inherit",
-                  }}
-                />
-              ) : (
-                <p style={{ fontSize: "12px", color: "#1c1917", lineHeight: "1.4" }}>
-                  {result.reply.reply_text}
-                </p>
-              )}
-            </div>
-          )}
-
-          {result.status === "flagged" && result.reply && (
             <div
               style={{
                 display: "flex",
-                gap: "6px",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "8px",
               }}
             >
-              {editingIdx === idx ? (
-                <>
-                  <Btn
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleApprove(result, editText)}
-                  >
-                    Save & Approve
-                  </Btn>
-                  <Btn
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEditingIdx(null)}
-                  >
-                    Cancel
-                  </Btn>
-                </>
-              ) : (
-                <>
-                  <Btn
-                    variant="primary"
-                    size="sm"
-                    onClick={() => handleApprove(result)}
-                  >
-                    Approve
-                  </Btn>
-                  <Btn
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setEditingIdx(idx);
-                      setEditText(result.reply!.reply_text);
-                    }}
-                  >
-                    Edit
-                  </Btn>
-                  <Btn
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleSkip(result)}
-                  >
-                    Skip
-                  </Btn>
-                </>
-              )}
+              <span
+                style={{
+                  fontWeight: 600,
+                  fontSize: "12px",
+                  color: "#1c1917",
+                }}
+              >
+                @{result.comment.username}
+              </span>
+              <Tag label={tagLabel} color={tagColor} />
             </div>
+
+            <p
+              style={{
+                fontSize: "12px",
+                color: "#1c1917",
+                marginBottom: "8px",
+                lineHeight: "1.4",
+              }}
+            >
+              {result.comment.comment_text}
+            </p>
+
+            {result.reply && (
+              <div
+                style={{
+                  backgroundColor: "#f7f6f3",
+                  borderRadius: "6px",
+                  padding: "8px 10px",
+                  marginBottom: isActionable ? "8px" : "0",
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: "11px",
+                    color: "#78746e",
+                    marginBottom: "4px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {isSent ? "Sent reply:" : "Draft reply:"}
+                </p>
+                {editingIdx === idx && !isSent ? (
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    style={{
+                      width: "100%",
+                      fontSize: "12px",
+                      border: "1px solid #e9e6e0",
+                      borderRadius: "4px",
+                      padding: "6px",
+                      resize: "vertical",
+                      minHeight: "50px",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                ) : (
+                  <p style={{ fontSize: "12px", color: "#1c1917", lineHeight: "1.4" }}>
+                    {result.reply.reply_text}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isActionable && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                }}
+              >
+                {editingIdx === idx ? (
+                  <>
+                    <Btn
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleApprove(result, editText)}
+                    >
+                      Save & Approve
+                    </Btn>
+                    <Btn
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditingIdx(null)}
+                    >
+                      Cancel
+                    </Btn>
+                  </>
+                ) : (
+                  <>
+                    <Btn
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleApprove(result)}
+                    >
+                      Approve
+                    </Btn>
+                    <Btn
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setEditingIdx(idx);
+                        setEditText(result.reply!.reply_text);
+                      }}
+                    >
+                      Edit
+                    </Btn>
+                    <Btn
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleSkip(result)}
+                    >
+                      Skip
+                    </Btn>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
+const PROGRESS_STEPS = ["opening", "finding", "liking", "typing", "posting", "verifying"] as const;
+
+const STEP_LABELS: Record<string, string> = {
+  opening: "Opening page",
+  finding: "Finding comment",
+  liking: "Liking comment",
+  typing: "Typing reply",
+  posting: "Posting reply",
+  verifying: "Verifying reply",
+  retrying: "Retrying",
+  done: "Sent!",
+  error: "Failed to send",
+};
+
+function SendProgress({ step }: { step: string }) {
+  const isDone = step === "done";
+  const isError = step === "error";
+  const isRetrying = step === "retrying";
+
+  const currentIdx = PROGRESS_STEPS.indexOf(step as typeof PROGRESS_STEPS[number]);
+  // For retrying, show partial progress; for done, full bar
+  const progress = isDone ? 100 : isError ? 0 : isRetrying ? 60 : currentIdx >= 0 ? ((currentIdx + 1) / PROGRESS_STEPS.length) * 100 : 0;
+  const label = STEP_LABELS[step] || step;
+
+  return (
+    <div style={{ marginTop: "10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+        <span style={{
+          fontSize: "11px",
+          fontWeight: 500,
+          color: isDone ? "#4a7c59" : isError ? "#8c3a3a" : "#3a5e8c",
+          display: "flex",
+          alignItems: "center",
+          gap: "5px",
+        }}>
+          {!isDone && !isError && (
+            <span style={{
+              display: "inline-block",
+              width: "10px",
+              height: "10px",
+              borderRadius: "50%",
+              border: "2px solid currentColor",
+              borderTopColor: "transparent",
+              animation: "spin 0.8s linear infinite",
+            }} />
           )}
-        </div>
-      ))}
+          {isDone && <span>&#10003;</span>}
+          {isError && <span>&#10007;</span>}
+          {label}
+        </span>
+        {!isDone && !isError && (
+          <span style={{ fontSize: "10px", color: "#b5b0a8" }}>
+            {currentIdx >= 0 ? `${currentIdx + 1}/${PROGRESS_STEPS.length}` : ""}
+          </span>
+        )}
+      </div>
+      <div style={{
+        width: "100%",
+        height: "4px",
+        backgroundColor: isError ? "#f0cece" : "#e9e6e0",
+        borderRadius: "2px",
+        overflow: "hidden",
+      }}>
+        <div style={{
+          width: `${progress}%`,
+          height: "100%",
+          backgroundColor: isDone ? "#4a7c59" : isError ? "#8c3a3a" : "#3a5e8c",
+          borderRadius: "2px",
+          transition: "width 0.5s ease",
+        }} />
+      </div>
     </div>
   );
 }
 
 function QueueTab() {
   const [queue, setQueue] = useState<QueuedReply[]>([]);
+  const [sendStatus, setSendStatus] = useState<{
+    step: string;
+    username: string;
+    platform: string;
+    ts: number;
+  } | null>(null);
 
   useEffect(() => {
-    chrome.storage.local.get("queue", ({ queue: q }) => setQueue(q || []));
+    chrome.storage.local.get(["queue", "send_status"], (result) => {
+      setQueue(result.queue || []);
+      if (result.send_status) setSendStatus(result.send_status);
+    });
     const listener = (
       changes: { [key: string]: chrome.storage.StorageChange },
       area: string
     ) => {
-      if (area === "local" && changes.queue) {
-        setQueue(changes.queue.newValue || []);
+      if (area === "local") {
+        if (changes.queue) setQueue(changes.queue.newValue || []);
+        if (changes.send_status) setSendStatus(changes.send_status.newValue || null);
       }
     };
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
-  const queued = queue.filter((r) => r.status === "queued");
+  // Auto-clear done/error status after 5 seconds
+  useEffect(() => {
+    if (sendStatus && (sendStatus.step === "done" || sendStatus.step === "error")) {
+      const timer = setTimeout(() => setSendStatus(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [sendStatus]);
+
+  const active = queue.filter((r) => r.status === "queued" || r.status === "sending" || r.status === "failed");
   const sent = queue.filter((r) => r.status === "sent");
 
   const handleSendNow = async (item: QueuedReply) => {
@@ -445,7 +614,7 @@ function QueueTab() {
 
   return (
     <div style={{ padding: "16px" }}>
-      {queued.length === 0 && sent.length === 0 && (
+      {active.length === 0 && sent.length === 0 && (
         <div
           style={{
             color: "#78746e",
@@ -458,7 +627,7 @@ function QueueTab() {
         </div>
       )}
 
-      {queued.length > 0 && (
+      {active.length > 0 && (
         <>
           <h3
             style={{
@@ -470,50 +639,74 @@ function QueueTab() {
               marginBottom: "10px",
             }}
           >
-            Queued ({queued.length})
+            Queued ({active.length})
           </h3>
-          {queued.map((item) => (
-            <div
-              key={item.comment_id}
-              style={{
-                backgroundColor: "#ffffff",
-                border: "1px solid #e9e6e0",
-                borderRadius: "8px",
-                padding: "12px",
-                marginBottom: "10px",
-              }}
-            >
+          {active.map((item) => {
+            const isSending = item.status === "sending" || (sendStatus && sendStatus.username === item.username && sendStatus.step !== "done" && sendStatus.step !== "error");
+            const isFailed = item.status === "failed" || (sendStatus && sendStatus.username === item.username && sendStatus.step === "error");
+            const step = sendStatus && sendStatus.username === item.username ? sendStatus.step : (item.status === "sending" ? "opening" : item.status === "failed" ? "error" : null);
+
+            return (
               <div
+                key={item.comment_id}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: "6px",
+                  backgroundColor: "#ffffff",
+                  border: `1px solid ${isFailed ? "#f0cece" : isSending ? "#c5d5f0" : "#e9e6e0"}`,
+                  borderRadius: "8px",
+                  padding: "12px",
+                  marginBottom: "10px",
                 }}
               >
-                <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                  <Tag label={item.platform} color={item.platform} />
-                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#1c1917" }}>
-                    @{item.username}
-                  </span>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "6px",
+                  }}
+                >
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <Tag label={item.platform} color={item.platform} />
+                    <span style={{ fontSize: "12px", fontWeight: 600, color: "#1c1917" }}>
+                      @{item.username}
+                    </span>
+                  </div>
+                  {!isSending && !isFailed && (
+                    <span style={{ fontSize: "11px", color: "#78746e" }}>
+                      {formatTime(item.scheduled_for)}
+                    </span>
+                  )}
                 </div>
-                <span style={{ fontSize: "11px", color: "#78746e" }}>
-                  {formatTime(item.scheduled_for)}
-                </span>
+                <p style={{ fontSize: "12px", color: "#1c1917", marginBottom: (isSending || isFailed) ? "0" : "8px", lineHeight: "1.4" }}>
+                  {item.reply_text}
+                </p>
+                {isFailed ? (
+                  <>
+                    <SendProgress step="error" />
+                    <div style={{ display: "flex", gap: "6px", marginTop: "8px" }}>
+                      <Btn variant="primary" size="sm" onClick={() => handleSendNow(item)}>
+                        Retry
+                      </Btn>
+                      <Btn variant="ghost" size="sm" onClick={() => handleRemove(item.comment_id)}>
+                        Remove
+                      </Btn>
+                    </div>
+                  </>
+                ) : step ? (
+                  <SendProgress step={step} />
+                ) : (
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <Btn variant="primary" size="sm" onClick={() => handleSendNow(item)}>
+                      Send now
+                    </Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => handleRemove(item.comment_id)}>
+                      Remove
+                    </Btn>
+                  </div>
+                )}
               </div>
-              <p style={{ fontSize: "12px", color: "#1c1917", marginBottom: "8px", lineHeight: "1.4" }}>
-                {item.reply_text}
-              </p>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <Btn variant="primary" size="sm" onClick={() => handleSendNow(item)}>
-                  Send now
-                </Btn>
-                <Btn variant="ghost" size="sm" onClick={() => handleRemove(item.comment_id)}>
-                  Remove
-                </Btn>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </>
       )}
 
@@ -606,7 +799,7 @@ function SettingsTab() {
     );
   }
 
-  const allPlatforms: Platform[] = ["instagram", "threads", "x", "linkedin"];
+  const allPlatforms: Platform[] = ["instagram", "threads", "x", "linkedin", "tiktok", "youtube"];
 
   return (
     <div style={{ padding: "16px" }}>
@@ -640,6 +833,48 @@ function SettingsTab() {
             (managed in dashboard)
           </span>
         </div>
+      </div>
+
+      {/* Scan frequency */}
+      <div style={{ marginBottom: "20px" }}>
+        <label
+          style={{
+            display: "block",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#78746e",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            marginBottom: "6px",
+          }}
+        >
+          Auto-Scan Frequency
+        </label>
+        <select
+          value={settings.scan_interval_minutes || 5}
+          onChange={(e) => updateSetting("scan_interval_minutes", Number(e.target.value))}
+          style={{
+            width: "100%",
+            border: "1px solid #e9e6e0",
+            borderRadius: "6px",
+            padding: "10px 12px",
+            fontSize: "12px",
+            fontFamily: "inherit",
+            color: "#1c1917",
+            backgroundColor: "#ffffff",
+            cursor: "pointer",
+            appearance: "auto",
+          }}
+        >
+          <option value={0}>Off</option>
+          <option value={1}>Every 1 minute</option>
+          <option value={2}>Every 2 minutes</option>
+          <option value={5}>Every 5 minutes</option>
+          <option value={10}>Every 10 minutes</option>
+          <option value={15}>Every 15 minutes</option>
+          <option value={30}>Every 30 minutes</option>
+          <option value={60}>Every hour</option>
+        </select>
       </div>
 
       {/* Batch times */}
@@ -799,6 +1034,15 @@ function SettingsTab() {
 }
 
 // --- Main App ---
+
+// Inject spinner keyframes once
+const styleId = "engageai-spinner";
+if (!document.getElementById(styleId)) {
+  const style = document.createElement("style");
+  style.id = styleId;
+  style.textContent = "@keyframes spin { to { transform: rotate(360deg) } }";
+  document.head.appendChild(style);
+}
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("scan");

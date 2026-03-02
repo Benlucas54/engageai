@@ -1,6 +1,6 @@
 export interface Comment {
   id: string;
-  platform: "instagram" | "threads" | "x";
+  platform: "instagram" | "threads" | "x" | "linkedin" | "tiktok" | "youtube";
   username: string;
   comment_text: string;
   post_title: string;
@@ -18,7 +18,9 @@ export interface Reply {
   reply_text: string;
   draft_text: string | null;
   approved: boolean;
+  auto_sent: boolean;
   sent_at: string | null;
+  send_step: string | null;
   generated_at: string;
 }
 
@@ -29,6 +31,7 @@ export interface VoiceSettings {
   avoid: string;
   signoff: string;
   auto_threshold: "none" | "simple" | "most" | "all";
+  platform_tones: Record<string, string>;
 }
 
 export interface VoiceFormData {
@@ -38,6 +41,16 @@ export interface VoiceFormData {
   avoid: string;
   signoff: string;
   threshold: "none" | "simple" | "most" | "all";
+  platform_tones: Record<string, string>;
+}
+
+export interface VoiceExample {
+  id: string;
+  platform: Comment["platform"] | null;
+  comment_text: string;
+  reply_text: string;
+  source: "manual" | "learned";
+  created_at: string;
 }
 
 export interface AgentRun {
@@ -64,11 +77,23 @@ export interface VoiceDocument {
 
 export interface LinkedAccount {
   id: string;
-  platform: "instagram" | "threads" | "x" | "linkedin";
+  platform: "instagram" | "threads" | "x" | "linkedin" | "tiktok" | "youtube";
   username: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface CommenterProfile {
+  id: string;
+  platform: Comment["platform"];
+  username: string;
+  summary: string;
+  topics: string[];
+  comment_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_analyzed_at: string | null;
 }
 
 export interface FlaggedComment extends Comment {

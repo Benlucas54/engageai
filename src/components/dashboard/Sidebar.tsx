@@ -27,6 +27,7 @@ export function Sidebar() {
   const flagCount = comments.filter((c) => {
     if (c.status !== "flagged" && c.status !== "pending") return false;
     if (c.replies?.some((r) => r.sent_at)) return false;
+    if (c.replies?.some((r) => r.approved)) return false;
     return true;
   }).length;
 

@@ -1,8 +1,9 @@
 import { supabase } from "../lib/supabase";
 import {
   generateReply,
-  getVoiceWithDocuments,
+  getVoiceContext,
   detectFlagCondition,
+  harvestLearnedExamples,
 } from "../lib/claude";
 import {
   getQueue,
@@ -12,6 +13,11 @@ import {
   getSettings,
   updateBadge,
 } from "../lib/storage";
+import {
+  upsertProfileCounters,
+  getCommenterProfile,
+  updateProfileSummaries,
+} from "../lib/profiles";
 import type {
   Platform,
   ScrapedComment,
@@ -36,6 +42,8 @@ function detectPlatform(url: string): Platform | null {
   if (url.includes("threads.net") || url.includes("threads.com")) return "threads";
   if (url.includes("x.com")) return "x";
   if (url.includes("linkedin.com")) return "linkedin";
+  if (url.includes("tiktok.com")) return "tiktok";
+  if (url.includes("youtube.com") || url.includes("youtu.be")) return "youtube";
   return null;
 }
 
@@ -120,11 +128,25 @@ async function handleScrape(
     }
   }
 
-  // Send scrape message to content script with owner username
-  const response = await chrome.tabs.sendMessage(tabId, {
-    action: "SCRAPE",
-    ownerUsername,
-  });
+  // Send scrape message to content script, with retries if not ready
+  let response: { success?: boolean; comments?: ScrapedComment[]; engagedComments?: { username: string; comment_text: string }[] } | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      response = await chrome.tabs.sendMessage(tabId, {
+        action: "SCRAPE",
+        ownerUsername,
+      });
+      break;
+    } catch {
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        console.log(`[EngageAI] Content script not available on tab ${tabId}, skipping`);
+        return [];
+      }
+    }
+  }
+  if (!response) return [];
 
   // Mark engaged comments (liked/replied externally) as "replied" in Supabase
   if (response?.engagedComments?.length) {
@@ -160,6 +182,11 @@ async function handleScrape(
   const newComments = await deduplicateComments(scraped);
   console.log(`[EngageAI] After dedup: ${newComments.length} new comments`);
 
+  // Upsert profile counters (fast, no AI)
+  if (newComments.length > 0) {
+    await upsertProfileCounters(newComments);
+  }
+
   if (newComments.length === 0) {
     // All comments already in DB — surface only ones from THIS scan that need attention
     const scrapedKeys = new Set(
@@ -176,28 +203,10 @@ async function handleScrape(
 
     console.log(`[EngageAI] Pending/flagged in DB:`, existing?.length ?? 0, "error:", existingErr?.message);
 
-    // Only show comments that were on the current page
-    const matched = (existing || []).filter((c) =>
-      scrapedKeys.has(`${c.username}:${c.comment_text}`)
-    );
-
-    console.log(`[EngageAI] Matched to current scan:`, matched.length);
-
-    // Mark unmatched flagged/pending comments as "replied" — if the extension
-    // doesn't see them as unengaged, the owner has already dealt with them.
-    const unmatched = (existing || []).filter(
-      (c) => !scrapedKeys.has(`${c.username}:${c.comment_text}`)
-    );
-    for (const c of unmatched) {
-      await supabase
-        .from("comments")
-        .update({ status: "replied" })
-        .eq("id", c.id);
-      console.log(`[EngageAI] Reconciled @${c.username} as replied (not found in scan)`);
-    }
+    console.log(`[EngageAI] Pending/flagged to surface:`, (existing || []).length);
 
     const results: ScanResult[] = [];
-    for (const comment of matched) {
+    for (const comment of (existing || [])) {
       const { data: reply } = await supabase
         .from("replies")
         .select("*")
@@ -213,28 +222,8 @@ async function handleScrape(
     return results;
   }
 
-  // Reconcile stale flagged/pending comments not found in this scan
-  const scrapedKeys = new Set(
-    scraped.map((c) => `${c.username}:${c.comment_text}`)
-  );
-  const { data: staleComments } = await supabase
-    .from("comments")
-    .select("id, username, comment_text")
-    .eq("platform", platform)
-    .in("status", ["pending", "flagged"])
-    .limit(100);
-  for (const c of (staleComments || [])) {
-    if (!scrapedKeys.has(`${c.username}:${c.comment_text}`)) {
-      await supabase
-        .from("comments")
-        .update({ status: "replied" })
-        .eq("id", c.id);
-      console.log(`[EngageAI] Reconciled @${c.username} as replied (not found in scan)`);
-    }
-  }
-
-  // Get voice settings for reply generation
-  const { voice, docContext } = await getVoiceWithDocuments();
+  // Get voice settings, documents, and examples for reply generation
+  const { voice, docContext, examples } = await getVoiceContext();
   const settings = await getSettings();
   const results: ScanResult[] = [];
 
@@ -271,7 +260,8 @@ async function handleScrape(
 
     // Generate reply
     try {
-      const replyText = await generateReply(comment, voice, docContext);
+      const profile = await getCommenterProfile(comment.platform, comment.username);
+      const replyText = await generateReply(comment, voice, docContext, examples, profile);
       const shouldFlag =
         forceFlag ||
         detectFlagCondition(comment.comment_text, voice.auto_threshold);
@@ -283,6 +273,7 @@ async function handleScrape(
           reply_text: replyText,
           draft_text: replyText,
           approved: !shouldFlag,
+          auto_sent: !shouldFlag,
         })
         .select()
         .single();
@@ -334,7 +325,227 @@ async function handleScrape(
     }
   }
 
+  // Fire-and-forget: update profile summaries in the background
+  updateProfileSummaries(newComments).catch((err) =>
+    console.error("[EngageAI] Profile summary update failed:", err)
+  );
+
   return results;
+}
+
+async function openMinimizedTab(url: string): Promise<{ tabId: number; windowId: number }> {
+  // Create an unfocused window so the page fully renders
+  // (minimized windows don't render interactive elements like reply modals)
+  const win = await chrome.windows.create({
+    url,
+    focused: false,
+    width: 1280,
+    height: 900,
+  });
+  const tabId = win.tabs?.[0]?.id;
+  if (!tabId || !win.id) throw new Error("Failed to create window");
+
+  // Wait for tab to finish loading
+  await new Promise<void>((resolve) => {
+    const listener = (tid: number, info: chrome.tabs.TabChangeInfo) => {
+      if (tid === tabId && info.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+
+  // Wait for content script to inject
+  await new Promise((r) => setTimeout(r, 3000));
+  return { tabId, windowId: win.id };
+}
+
+async function scanTab(
+  url: string,
+  platform: Platform
+): Promise<ScanResult[]> {
+  const { tabId, windowId } = await openMinimizedTab(url);
+  try {
+    return await handleScrape(tabId, platform);
+  } finally {
+    await chrome.windows.remove(windowId).catch(() => {});
+  }
+}
+
+async function pollScanRequests(): Promise<void> {
+  // Check for agent_runs with status "running" started in the last 5 minutes
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const { data: runs } = await supabase
+    .from("agent_runs")
+    .select("id, started_at")
+    .eq("status", "running")
+    .gte("started_at", fiveMinutesAgo)
+    .order("started_at", { ascending: false })
+    .limit(1);
+
+  if (!runs?.length) return;
+
+  const run = runs[0];
+  const { last_handled_run_id } = await chrome.storage.local.get(
+    "last_handled_run_id"
+  );
+  if (last_handled_run_id === run.id) return;
+
+  // Claim this run so we don't re-process it
+  await chrome.storage.local.set({ last_handled_run_id: run.id });
+  console.log(`[EngageAI] Handling scan request: run ${run.id}`);
+
+  let commentsFound = 0;
+  let repliesSent = 0;
+  let flaggedCount = 0;
+
+  try {
+    // Get enabled linked accounts
+    const { data: accounts } = await supabase
+      .from("linked_accounts")
+      .select("platform, enabled")
+      .eq("enabled", true);
+
+    const enabledPlatforms = new Set(
+      (accounts || []).map((a: { platform: string }) => a.platform)
+    );
+
+    // Threads: open activity page in a background tab
+    if (enabledPlatforms.has("threads")) {
+      console.log("[EngageAI] Scanning Threads activity page...");
+      try {
+        const results = await scanTab(
+          "https://www.threads.net/activity",
+          "threads"
+        );
+        for (const r of results) {
+          commentsFound++;
+          if (r.status === "flagged") flaggedCount++;
+          if (r.status === "auto-approved") repliesSent++;
+        }
+      } catch (err) {
+        console.error("[EngageAI] Threads scan error:", err);
+      }
+    }
+
+    // Other platforms: scan already-open tabs
+    const platformUrlPatterns: [Platform, string][] = [
+      ["instagram", "instagram.com"],
+      ["x", "x.com"],
+      ["linkedin", "linkedin.com"],
+    ];
+
+    for (const [platform, urlPattern] of platformUrlPatterns) {
+      if (!enabledPlatforms.has(platform)) continue;
+
+      const tabs = await chrome.tabs.query({ url: `*://*.${urlPattern}/*` });
+      for (const tab of tabs) {
+        if (!tab.id || !tab.url) continue;
+        console.log(`[EngageAI] Scanning open ${platform} tab: ${tab.url}`);
+        try {
+          const results = await handleScrape(tab.id, platform);
+          for (const r of results) {
+            commentsFound++;
+            if (r.status === "flagged") flaggedCount++;
+            if (r.status === "auto-approved") repliesSent++;
+          }
+        } catch (err) {
+          console.error(`[EngageAI] ${platform} scan error:`, err);
+        }
+      }
+    }
+
+    // Update agent_runs with results
+    await supabase
+      .from("agent_runs")
+      .update({
+        status: "success",
+        completed_at: new Date().toISOString(),
+        comments_found: commentsFound,
+        replies_sent: repliesSent,
+        flagged_count: flaggedCount,
+      })
+      .eq("id", run.id);
+
+    console.log(
+      `[EngageAI] Scan complete: ${commentsFound} comments, ${repliesSent} auto-approved, ${flaggedCount} flagged`
+    );
+  } catch (err) {
+    console.error("[EngageAI] Scan request failed:", err);
+    await supabase
+      .from("agent_runs")
+      .update({
+        status: "error",
+        completed_at: new Date().toISOString(),
+        error_message: err instanceof Error ? err.message : "Unknown error",
+      })
+      .eq("id", run.id);
+  }
+}
+
+async function autoScan(): Promise<void> {
+  // Harvest learned examples from recently sent replies
+  await harvestLearnedExamples().catch((err) =>
+    console.error("[EngageAI] Harvest learned examples failed:", err)
+  );
+
+  // Skip if a manual run is currently active
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const { data: activeRuns } = await supabase
+    .from("agent_runs")
+    .select("id")
+    .eq("status", "running")
+    .gte("started_at", fiveMinutesAgo)
+    .limit(1);
+  if (activeRuns?.length) return;
+
+  console.log("[EngageAI] Auto-scan starting...");
+
+  const { data: accounts } = await supabase
+    .from("linked_accounts")
+    .select("platform, enabled")
+    .eq("enabled", true);
+  const enabledPlatforms = new Set(
+    (accounts || []).map((a: { platform: string }) => a.platform)
+  );
+  if (enabledPlatforms.size === 0) return;
+
+  let commentsFound = 0;
+
+  // Threads: open activity page
+  if (enabledPlatforms.has("threads")) {
+    try {
+      const results = await scanTab("https://www.threads.net/activity", "threads");
+      commentsFound += results.length;
+    } catch (err) {
+      console.log("[EngageAI] Auto-scan Threads error:", err);
+    }
+  }
+
+  // Other platforms: scan open tabs
+  const platformUrlPatterns: [Platform, string][] = [
+    ["instagram", "instagram.com"],
+    ["x", "x.com"],
+    ["linkedin", "linkedin.com"],
+  ];
+  for (const [platform, urlPattern] of platformUrlPatterns) {
+    if (!enabledPlatforms.has(platform)) continue;
+    const tabs = await chrome.tabs.query({ url: `*://*.${urlPattern}/*` });
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url) continue;
+      try {
+        const results = await handleScrape(tab.id, platform);
+        commentsFound += results.length;
+      } catch {
+        // Silently skip tabs where content script isn't ready
+      }
+    }
+  }
+
+  if (commentsFound > 0) {
+    console.log(`[EngageAI] Auto-scan found ${commentsFound} new comments`);
+  }
 }
 
 async function handleApprove(
@@ -382,42 +593,42 @@ async function runBatch(): Promise<void> {
   );
 
   for (const item of due) {
+    let windowId: number | undefined;
     try {
       await updateQueueItem(item.comment_id, { status: "sending" });
 
-      // Open a background tab to the post
-      const tab = await chrome.tabs.create({
-        url: item.post_url,
-        active: false,
+      // Store current reply_id so the storage listener can sync steps to Supabase
+      await chrome.storage.local.set({
+        send_reply_id: item.reply_id,
+        send_status: { step: "opening", username: item.username, platform: item.platform, ts: Date.now() },
       });
+      await supabase.from("replies").update({ send_step: "opening" }).eq("id", item.reply_id);
 
-      // Wait for tab to load
-      await new Promise<void>((resolve) => {
-        const listener = (
-          tabId: number,
-          info: chrome.tabs.TabChangeInfo
-        ) => {
-          if (tabId === tab.id && info.status === "complete") {
-            chrome.tabs.onUpdated.removeListener(listener);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+      // Open post in a background window
+      const opened = await openMinimizedTab(item.post_url);
+      windowId = opened.windowId;
+      const tabId = opened.tabId;
 
-      // Wait a bit for content script to inject
-      await new Promise((r) => setTimeout(r, 3000));
-
-      // Send post reply message to content script
-      const response = await chrome.tabs.sendMessage(tab.id!, {
-        action: "POST_REPLY",
-        payload: item,
-      });
+      // Send post reply message to content script, retrying until it connects
+      let response: { success?: boolean } | undefined;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          response = await chrome.tabs.sendMessage(tabId, {
+            action: "POST_REPLY",
+            payload: item,
+          });
+          break;
+        } catch {
+          console.log(`[EngageAI] POST_REPLY attempt ${attempt + 1}/5 — content script not ready`);
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+      if (!response) throw new Error("Content script never connected");
 
       if (response?.success) {
         await supabase
           .from("replies")
-          .update({ sent_at: new Date().toISOString() })
+          .update({ sent_at: new Date().toISOString(), send_step: "done" })
           .eq("id", item.reply_id);
         await supabase
           .from("comments")
@@ -425,11 +636,12 @@ async function runBatch(): Promise<void> {
           .eq("id", item.comment_id);
         await updateQueueItem(item.comment_id, { status: "sent" });
       } else {
+        await supabase
+          .from("replies")
+          .update({ send_step: "error" })
+          .eq("id", item.reply_id);
         await updateQueueItem(item.comment_id, { status: "failed" });
       }
-
-      // Close the tab
-      if (tab.id) await chrome.tabs.remove(tab.id);
 
       // Humanised delay between replies (8-20 seconds)
       await new Promise((r) =>
@@ -438,6 +650,11 @@ async function runBatch(): Promise<void> {
     } catch (err) {
       console.error("Error in batch send:", err);
       await updateQueueItem(item.comment_id, { status: "failed" });
+    } finally {
+      // Always close the window, even on error
+      if (windowId) {
+        await chrome.windows.remove(windowId).catch(() => {});
+      }
     }
   }
 
@@ -449,8 +666,57 @@ async function runBatch(): Promise<void> {
   await updateBadge();
 }
 
+async function pollDashboardApprovals(): Promise<void> {
+  // Check Supabase for replies approved via dashboard but not yet sent
+  const { data: pendingReplies } = await supabase
+    .from("replies")
+    .select("*, comments(*)")
+    .eq("approved", true)
+    .is("sent_at", null)
+    .limit(20);
+
+  if (!pendingReplies?.length) return;
+
+  const queue = await getQueue();
+  const queuedIds = new Set(queue.map((q) => q.comment_id));
+
+  for (const reply of pendingReplies) {
+    const comment = reply.comments;
+    if (!comment || comment.status === "replied" || comment.status === "hidden") continue;
+    if (queuedIds.has(comment.id)) continue;
+
+    await addToQueue({
+      comment_id: comment.id,
+      comment_external_id: comment.comment_external_id || "",
+      reply_id: reply.id,
+      reply_text: reply.reply_text,
+      platform: comment.platform,
+      post_url: comment.post_url || "",
+      username: comment.username,
+      comment_text: comment.comment_text,
+      scheduled_for: Date.now(),
+      status: "queued",
+    });
+    console.log(`[EngageAI] Queued dashboard-approved reply for @${comment.username}`);
+  }
+
+  await runBatch();
+}
+
 function scheduleBatchAlarms(): void {
   chrome.alarms.clearAll();
+  // Poll for dashboard-approved replies every minute
+  chrome.alarms.create("poll_approvals", { periodInMinutes: 1 });
+  // Poll for "Run Now" scan requests every 15 seconds
+  chrome.alarms.create("poll_scan", { periodInMinutes: 0.25 });
+  // Auto-scan for new comments (interval from settings)
+  getSettings().then((s) => {
+    const interval = s.scan_interval_minutes || 5;
+    if (interval > 0) {
+      chrome.alarms.create("auto_scan", { periodInMinutes: interval });
+    }
+  });
+
   getSettings().then((settings) => {
     for (const time of settings.batch_times) {
       const [hours, minutes] = time.split(":").map(Number);
@@ -473,6 +739,26 @@ function scheduleBatchAlarms(): void {
   });
 }
 
+// --- Sync send_status from content scripts to Supabase ---
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.send_status) return;
+  const status = changes.send_status.newValue;
+  if (!status?.step) return;
+
+  // Mirror the step to the reply record in Supabase
+  chrome.storage.local.get("send_reply_id", ({ send_reply_id }) => {
+    if (!send_reply_id) return;
+    supabase
+      .from("replies")
+      .update({ send_step: status.step })
+      .eq("id", send_reply_id)
+      .then(() => {
+        console.log(`[EngageAI] Synced send_step "${status.step}" to Supabase`);
+      });
+  });
+});
+
 // --- Event listeners ---
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -482,6 +768,7 @@ chrome.runtime.onInstalled.addListener(() => {
       auto_threshold: "simple",
       active_platforms: ["instagram", "threads"],
       jitter_minutes: 15,
+      scan_interval_minutes: 5,
     },
     queue: [],
   });
@@ -489,14 +776,20 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name.startsWith("batch_")) {
+  if (alarm.name === "poll_approvals") {
+    pollDashboardApprovals();
+  } else if (alarm.name === "poll_scan") {
+    pollScanRequests();
+  } else if (alarm.name === "auto_scan") {
+    autoScan();
+  } else if (alarm.name.startsWith("batch_")) {
     runBatch();
   }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.action === "SCRAPE_CURRENT") {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
       const tab = tabs[0];
       if (!tab?.id || !tab.url) {
         sendResponse({ success: false, error: "No active tab" });
@@ -504,12 +797,41 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       const platform = detectPlatform(tab.url);
       if (!platform) {
-        sendResponse({ success: false, error: "Unsupported platform" });
+        sendResponse({ success: false, error: `Unsupported platform: ${tab.url}` });
         return;
       }
+      console.log(`[EngageAI] Manual scan: ${platform} tab ${tab.id} — ${tab.url}`);
       try {
-        const results = await handleScrape(tab.id, platform);
-        sendResponse({ success: true, results, platform });
+        const newResults = await handleScrape(tab.id, platform);
+
+        // Fetch existing comments for this platform
+        const { data: existing } = await supabase
+          .from("comments")
+          .select("*")
+          .eq("platform", platform)
+          .order("created_at", { ascending: false })
+          .limit(50);
+
+        // Merge: new results + existing items (deduped)
+        const newIds = new Set(newResults.map((r) => r.comment.id));
+        const allResults = [...newResults];
+        for (const comment of (existing || [])) {
+          if (newIds.has(comment.id)) continue;
+          const { data: reply } = await supabase
+            .from("replies")
+            .select("*")
+            .eq("comment_id", comment.id)
+            .limit(1)
+            .single();
+          allResults.push({
+            comment,
+            reply: reply || undefined,
+            status: comment.status === "flagged" ? "flagged" : "auto-approved",
+          });
+        }
+
+        console.log(`[EngageAI] Manual scan: ${newResults.length} new, ${allResults.length} total`);
+        sendResponse({ success: true, results: allResults, platform });
       } catch (err) {
         sendResponse({
           success: false,

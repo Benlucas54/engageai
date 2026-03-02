@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useComments } from "@/hooks/useComments";
 import { useAgentStatus } from "@/hooks/useAgentStatus";
+import { useAgentActivity } from "@/hooks/useAgentActivity";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
@@ -12,9 +13,49 @@ import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
 import { Divider } from "@/components/ui/Divider";
 
+const ACTIVITY_LABELS: Record<string, { icon: string; label: string; color: string }> = {
+  scanning: { icon: "...", label: "Scanning", color: "text-blue-600" },
+  liked: { icon: "\u2764", label: "Liked & queued", color: "text-pink-500" },
+  replied: { icon: "\u2713", label: "Replied", color: "text-green-600" },
+  flagged: { icon: "\u25CF", label: "Inbox", color: "text-amber-500" },
+};
+
+function AgentActivityFeed() {
+  const { items, isRunning } = useAgentActivity();
+
+  if (items.length === 0 && !isRunning) return null;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-3">
+        <MiniLabel>Agent activity</MiniLabel>
+        {isRunning && (
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+        )}
+      </div>
+      {items.length === 0 && isRunning && (
+        <p className="text-[12px] text-content-faint">Scanning for new comments...</p>
+      )}
+      <div className="flex flex-col gap-1.5 max-h-[200px] overflow-y-auto">
+        {items.map((item) => {
+          const a = ACTIVITY_LABELS[item.status] || ACTIVITY_LABELS.scanning;
+          return (
+            <div key={item.id} className="flex items-center gap-2 py-1">
+              <span className={`text-[12px] ${a.color} w-4 text-center shrink-0`}>{a.icon}</span>
+              <Tag type={item.platform}>{P_LABEL[item.platform]}</Tag>
+              <span className="text-[12px] text-content font-medium">@{item.username}</span>
+              <span className="text-[11px] text-content-faint truncate flex-1">{item.text}</span>
+              <span className={`text-[11px] font-medium ${a.color} shrink-0`}>{a.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 export function OverviewView() {
-  const { comments, refetch: refetchComments } = useComments();
-  const [refreshing, setRefreshing] = useState(false);
+  const { comments } = useComments();
   const agentRun = useAgentStatus();
   const [runState, setRunState] = useState<"idle" | "starting" | "running">("idle");
 
@@ -30,29 +71,23 @@ export function OverviewView() {
     }
   }, [isAgentRunning, runState]);
 
-  const handleRunNow = useCallback(async () => {
-    if (runState !== "idle" || isAgentRunning) return;
-    setRunState("starting");
-    try {
-      const res = await fetch("/api/run-now", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to start agent");
-      setRunState("running");
-    } catch {
-      setRunState("idle");
-    }
-  }, [runState, isAgentRunning]);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayISO = todayStart.toISOString();
+  const todayComments = comments.filter((c) => c.synced_at >= todayISO || c.created_at >= todayISO);
 
-  const replied = comments.filter((c) => c.replies?.some((r) => r.sent_at)).length;
+  const replied = todayComments.filter((c) => c.replies?.some((r) => r.auto_sent && r.sent_at)).length;
   const flagged = comments.filter((c) => {
     if (c.status !== "flagged" && c.status !== "pending") return false;
     if (c.replies?.some((r) => r.sent_at)) return false;
+    if (c.replies?.some((r) => r.approved)) return false;
     return true;
   }).length;
 
-  const platforms = (["instagram", "threads", "x"] as const).map((p) => {
-    const total = comments.filter((c) => c.platform === p).length;
-    const auto = comments.filter(
-      (c) => c.platform === p && c.replies?.some((r) => r.sent_at)
+  const platforms = (["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const).map((p) => {
+    const total = todayComments.filter((c) => c.platform === p).length;
+    const auto = todayComments.filter(
+      (c) => c.platform === p && c.replies?.some((r) => r.auto_sent && r.sent_at)
     ).length;
     return { p, total, auto };
   });
@@ -68,36 +103,32 @@ export function OverviewView() {
               ? `Last run ${timeAgo(agentRun.completed_at)}`
               : "Agent has not run yet"}
         </MiniLabel>
-        <div className="flex gap-2">
-          <Btn
-            size="sm"
-            variant="secondary"
-            onClick={async () => {
-              setRefreshing(true);
-              await refetchComments();
-              setRefreshing(false);
-            }}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </Btn>
-          <Btn
-            size="sm"
-            onClick={handleRunNow}
-            disabled={runState !== "idle" || isAgentRunning}
-          >
-            {runState === "starting"
-              ? "Starting…"
-              : isAgentRunning
-                ? "Running…"
-                : "Run Now"}
-          </Btn>
-        </div>
+        <Btn
+          size="sm"
+          onClick={async () => {
+            setRunState("starting");
+            try {
+              await fetch("/api/run-now", { method: "POST" });
+              setRunState("running");
+            } catch {
+              setRunState("idle");
+            }
+          }}
+          disabled={runState === "starting"}
+        >
+          {runState === "starting"
+            ? "Restarting…"
+            : isAgentRunning
+              ? "Restart Agent"
+              : "Run Now"}
+        </Btn>
       </div>
+
+      <AgentActivityFeed />
 
       <div className="grid grid-cols-3 gap-2.5">
         {[
-          { label: "Total today", val: comments.length, tag: null },
+          { label: "Total today", val: todayComments.length, tag: null },
           { label: "Auto-handled", val: replied, tag: "replied" as const },
           { label: "Inbox", val: flagged, tag: "flagged" as const },
         ].map(({ label, val, tag }) => (

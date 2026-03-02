@@ -5,6 +5,8 @@ export const P_LABEL: Record<string, string> = {
   threads: "Threads",
   x: "X",
   linkedin: "LinkedIn",
+  tiktok: "TikTok",
+  youtube: "YouTube",
 };
 
 export const NAV_ITEMS: NavItem[] = [
@@ -24,4 +26,6 @@ export const TAG_STYLES: Record<string, string> = {
   threads:   "bg-tag-threads-bg text-tag-threads-text border border-tag-threads-border",
   x:         "bg-tag-x-bg text-tag-x-text border border-tag-x-border",
   linkedin:  "bg-tag-threads-bg text-tag-threads-text border border-tag-threads-border",
+  tiktok:    "bg-tag-threads-bg text-tag-threads-text border border-tag-threads-border",
+  youtube:   "bg-tag-flagged-bg text-tag-flagged-text border border-tag-flagged-border",
 };

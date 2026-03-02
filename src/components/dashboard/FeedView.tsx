@@ -43,6 +43,7 @@ export function FeedView() {
         ? comments.filter((c) => {
             if (c.status !== "flagged" && c.status !== "pending") return false;
             if (c.replies?.some((r) => r.sent_at)) return false;
+            if (c.replies?.some((r) => r.approved)) return false;
             return true;
           })
         : comments.filter((c) => c.status === filter);

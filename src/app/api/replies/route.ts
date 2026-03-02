@@ -4,11 +4,12 @@ import { createServerClient } from "@/lib/supabase-server";
 export async function PATCH(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { id, approved, draft_text } = body;
+  const { id, approved, draft_text, reply_text } = body;
 
   const update: Record<string, unknown> = {};
   if (approved !== undefined) update.approved = approved;
   if (draft_text !== undefined) update.draft_text = draft_text;
+  if (reply_text !== undefined) update.reply_text = reply_text;
 
   const { data, error } = await supabase
     .from("replies")

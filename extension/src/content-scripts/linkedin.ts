@@ -1,5 +1,14 @@
 import type { ScrapedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 
+function parseRelativeTime(text: string): string {
+  const match = text.match(/(\d+)\s*(s|m|h|d|w|mo|y)/i);
+  if (!match) return new Date().toISOString();
+  const num = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000, mo: 2592000000, y: 31536000000 }[unit] || 0;
+  return new Date(Date.now() - num * ms).toISOString();
+}
+
 const MAX_REPLIES_PER_BATCH = 15;
 let repliesSentThisSession = 0;
 
@@ -31,6 +40,16 @@ function scrape(): ScrapedComment[] {
 
     if (!username || !text) continue;
 
+    // Extract timestamp — LinkedIn uses <time> or relative time spans
+    const timeEl = el.querySelector("time[datetime]");
+    let created_at = timeEl?.getAttribute("datetime") || "";
+    if (!created_at) {
+      // Parse relative time like "2h", "3d", "1w"
+      const relEl = el.querySelector('span[class*="time"], time, span.visually-hidden');
+      const relText = relEl?.textContent?.trim() || "";
+      created_at = parseRelativeTime(relText);
+    }
+
     comments.push({
       platform: "linkedin",
       username,
@@ -38,11 +57,17 @@ function scrape(): ScrapedComment[] {
       post_title: "LinkedIn Post",
       post_url: postUrl,
       comment_external_id: `li:${username}:${[...text].slice(0, 30).join("")}`,
-      created_at: new Date().toISOString(),
+      created_at,
     });
   }
 
   return comments;
+}
+
+async function setStatus(step: string, username: string) {
+  await chrome.storage.local.set({
+    send_status: { step, username, platform: "linkedin", ts: Date.now() },
+  });
 }
 
 async function postReply(
@@ -56,6 +81,7 @@ async function postReply(
   }
 
   // Find the comment by matching text
+  await setStatus("finding", payload.username);
   const commentEls = document.querySelectorAll(
     'article.comments-comment-item, div[class*="comments-comment-item"], div[data-id][class*="comment"]'
   );
@@ -72,10 +98,30 @@ async function postReply(
     }
   }
 
-  if (!targetEl) return { success: false, error: "Comment not found" };
+  if (!targetEl) {
+    await setStatus("error", payload.username);
+    return { success: false, error: "Comment not found" };
+  }
 
   targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
   await delay(1500);
+
+  // Like the comment (click like button if not already active)
+  await setStatus("liking", payload.username);
+  const likeBtns = targetEl.querySelectorAll('button');
+  for (const btn of likeBtns) {
+    const label = (btn.getAttribute("aria-label") || "").toLowerCase();
+    if (label.includes("like") && !label.includes("unlike")) {
+      const isActive = btn.getAttribute("aria-pressed") === "true" ||
+        btn.classList.toString().includes("active");
+      if (!isActive) {
+        btn.click();
+        console.log("[EngageAI] Liked comment");
+        await delay(1000 + Math.random() * 500);
+      }
+      break;
+    }
+  }
 
   // Click Reply button
   const replyBtns = targetEl.querySelectorAll("button");
@@ -101,34 +147,84 @@ async function postReply(
   await delay(500);
 
   // Type with slower delays (LinkedIn is stricter)
+  await setStatus("typing", payload.username);
   for (const char of payload.reply_text) {
     replyBox.textContent = (replyBox.textContent || "") + char;
     replyBox.dispatchEvent(new InputEvent("input", { bubbles: true }));
     await delay(120 + Math.random() * 80);
   }
 
+  await delay(500);
+
+  // Verify typed text matches expected reply before posting
+  const typed = (replyBox.textContent || "").trim();
+  const expected = payload.reply_text.trim();
+  if (typed !== expected) {
+    console.log(`[EngageAI] Text mismatch — fixing`);
+    replyBox.textContent = expected;
+    replyBox.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await delay(300);
+  }
+
   // Longer pause after typing
   await delay(2000 + Math.random() * 2000);
 
-  // Click submit button
-  const buttons = document.querySelectorAll("button");
-  for (const btn of buttons) {
-    const text = btn.textContent?.trim().toLowerCase();
-    if (
-      (text === "post" || text === "reply" || text === "submit") &&
-      !btn.disabled
-    ) {
-      btn.click();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await setStatus("retrying", payload.username);
+      console.log(`[EngageAI] Reply attempt ${attempt + 1}/3`);
+      await delay(2000);
+
+      // Re-clear and retype
+      replyBox.focus();
+      await delay(300);
+      replyBox.textContent = "";
+      replyBox.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      await delay(200);
+
+      await setStatus("typing", payload.username);
+      for (const char of payload.reply_text) {
+        replyBox.textContent = (replyBox.textContent || "") + char;
+        replyBox.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        await delay(120 + Math.random() * 80);
+      }
+      await delay(2000 + Math.random() * 2000);
+    }
+
+    // Click submit button
+    await setStatus("posting", payload.username);
+    const buttons = document.querySelectorAll("button");
+    let clicked = false;
+    for (const btn of buttons) {
+      const text = btn.textContent?.trim().toLowerCase();
+      if (
+        (text === "post" || text === "reply" || text === "submit") &&
+        !btn.disabled
+      ) {
+        btn.click();
+        clicked = true;
+        break;
+      }
+    }
+    if (!clicked) continue;
+
+    // Verify reply appeared
+    await setStatus("verifying", payload.username);
+    await delay(3000);
+    const snippet = payload.reply_text.slice(0, 30);
+    if (document.body.innerText.includes(snippet)) {
       repliesSentThisSession++;
-      await delay(3000);
+      await setStatus("done", payload.username);
       return {
         success: true,
         comment_external_id: payload.comment_external_id,
       };
     }
+    console.log(`[EngageAI] Reply not verified, attempt ${attempt + 1}/3`);
   }
 
-  return { success: false, error: "Submit button not found" };
+  await setStatus("error", payload.username);
+  return { success: false, error: "Reply not confirmed after 3 attempts" };
 }
 
 function delay(ms: number): Promise<void> {
