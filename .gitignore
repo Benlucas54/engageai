@@ -10,3 +10,4 @@ out/
 .vercel
 .env*.local
 extension/dist/
+tsconfig.tsbuildinfo
