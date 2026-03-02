@@ -361,18 +361,6 @@ async function openMinimizedTab(url: string): Promise<{ tabId: number; windowId:
   return { tabId, windowId: win.id };
 }
 
-async function scanTab(
-  url: string,
-  platform: Platform
-): Promise<ScanResult[]> {
-  const { tabId, windowId } = await openMinimizedTab(url);
-  try {
-    return await handleScrape(tabId, platform);
-  } finally {
-    await chrome.windows.remove(windowId).catch(() => {});
-  }
-}
-
 async function pollScanRequests(): Promise<void> {
   // Check for agent_runs with status "running" started in the last 5 minutes
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -411,27 +399,10 @@ async function pollScanRequests(): Promise<void> {
       (accounts || []).map((a: { platform: string }) => a.platform)
     );
 
-    // Threads: open activity page in a background tab
-    if (enabledPlatforms.has("threads")) {
-      console.log("[EngageAI] Scanning Threads activity page...");
-      try {
-        const results = await scanTab(
-          "https://www.threads.net/activity",
-          "threads"
-        );
-        for (const r of results) {
-          commentsFound++;
-          if (r.status === "flagged") flaggedCount++;
-          if (r.status === "auto-approved") repliesSent++;
-        }
-      } catch (err) {
-        console.error("[EngageAI] Threads scan error:", err);
-      }
-    }
-
-    // Other platforms: scan already-open tabs
+    // Scan already-open tabs for each enabled platform
     const platformUrlPatterns: [Platform, string][] = [
       ["instagram", "instagram.com"],
+      ["threads", "threads.net"],
       ["x", "x.com"],
       ["linkedin", "linkedin.com"],
     ];
@@ -513,19 +484,10 @@ async function autoScan(): Promise<void> {
 
   let commentsFound = 0;
 
-  // Threads: open activity page
-  if (enabledPlatforms.has("threads")) {
-    try {
-      const results = await scanTab("https://www.threads.net/activity", "threads");
-      commentsFound += results.length;
-    } catch (err) {
-      console.log("[EngageAI] Auto-scan Threads error:", err);
-    }
-  }
-
-  // Other platforms: scan open tabs
+  // Scan open tabs for each enabled platform
   const platformUrlPatterns: [Platform, string][] = [
     ["instagram", "instagram.com"],
+    ["threads", "threads.net"],
     ["x", "x.com"],
     ["linkedin", "linkedin.com"],
   ];
