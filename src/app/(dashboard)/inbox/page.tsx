@@ -1,10 +1,10 @@
 import { PageHeader } from "@/components/dashboard/PageHeader";
 import { FlaggedView } from "@/components/dashboard/FlaggedView";
 
-export default function FlaggedPage() {
+export default function InboxPage() {
   return (
     <>
-      <PageHeader title="Flagged" />
+      <PageHeader title="Inbox" />
       <FlaggedView />
     </>
   );

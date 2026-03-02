@@ -291,7 +291,7 @@ function ScanTab() {
             >
               @{result.comment.username}
             </span>
-            <Tag label={result.status} color={result.status === "auto-approved" ? "replied" : result.status} />
+            <Tag label={result.status === "flagged" ? "inbox" : result.status} color={result.status === "auto-approved" ? "replied" : result.status} />
           </div>
 
           <p

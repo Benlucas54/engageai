@@ -74,9 +74,15 @@ export interface ContentScriptMessage {
   ownerUsername?: string;
 }
 
+export interface EngagedComment {
+  username: string;
+  comment_text: string;
+}
+
 export interface ContentScriptResponse {
   success: boolean;
   comments?: ScrapedComment[];
+  engagedComments?: EngagedComment[];
   error?: string;
   comment_external_id?: string;
 }

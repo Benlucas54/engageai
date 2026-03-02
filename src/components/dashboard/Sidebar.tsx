@@ -24,14 +24,11 @@ export function Sidebar() {
   const { comments } = useComments();
   const agentRun = useAgentStatus();
 
-  const repliedUsernames = new Set(
-    comments
-      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
-      .map((c) => c.username),
-  );
-  const flagCount = comments.filter(
-    (c) => c.status === "flagged" && !repliedUsernames.has(c.username),
-  ).length;
+  const flagCount = comments.filter((c) => {
+    if (c.status !== "flagged" && c.status !== "pending") return false;
+    if (c.replies?.some((r) => r.sent_at)) return false;
+    return true;
+  }).length;
 
   const statusColor = agentRun
     ? agentRun.status === "success"

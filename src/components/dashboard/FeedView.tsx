@@ -15,7 +15,7 @@ export function FeedView() {
   const { accounts } = useLinkedAccounts();
   const { setWide } = useLayout();
 
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("inbox");
   const [view, setView] = useState<View>("list");
   const [visiblePlatforms, setVisiblePlatforms] = useState<Set<string>>(
     new Set()
@@ -36,16 +36,15 @@ export function FeedView() {
     return () => setWide(false);
   }, [view, setWide]);
 
-  const repliedUsernames = new Set(
-    comments
-      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
-      .map((c) => c.username),
-  );
   const filtered =
     filter === "all"
       ? comments
-      : filter === "flagged"
-        ? comments.filter((c) => c.status === "flagged" && !repliedUsernames.has(c.username))
+      : filter === "inbox"
+        ? comments.filter((c) => {
+            if (c.status !== "flagged" && c.status !== "pending") return false;
+            if (c.replies?.some((r) => r.sent_at)) return false;
+            return true;
+          })
         : comments.filter((c) => c.status === filter);
 
   const togglePlatform = (p: string) => {
@@ -64,19 +63,27 @@ export function FeedView() {
     <div>
       {/* Status filters + view toggle */}
       <div className="flex items-center gap-1.5 mb-5 flex-wrap">
-        {["all", "replied", "flagged", "hidden"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3.5 py-1.5 rounded-full border text-xs font-medium cursor-pointer font-sans capitalize tracking-[0.02em] ${
-              filter === f
-                ? "border-content bg-content text-white"
-                : "border-border bg-surface-card text-content-sub"
-            }`}
-          >
-            {f === "all" ? `All \u00B7 ${comments.length}` : f}
-          </button>
-        ))}
+        {["inbox", "replied", "hidden", "all"].map((f) => {
+          const label =
+            f === "all"
+              ? `All \u00B7 ${comments.length}`
+              : f === "inbox"
+                ? "Inbox"
+                : f;
+          return (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3.5 py-1.5 rounded-full border text-xs font-medium cursor-pointer font-sans capitalize tracking-[0.02em] ${
+                filter === f
+                  ? "border-content bg-content text-white"
+                  : "border-border bg-surface-card text-content-sub"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
 
         <div className="ml-auto flex items-center gap-2">
           {view === "columns" && (

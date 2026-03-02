@@ -9,8 +9,8 @@ export const P_LABEL: Record<string, string> = {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "Overview", icon: "\u25CB", href: "/dashboard" },
+  { id: "Inbox",    icon: "\u25C7", href: "/inbox", alert: true },
   { id: "Feed",     icon: "\u2261", href: "/feed" },
-  { id: "Flagged",  icon: "\u25C7", href: "/flagged", alert: true },
   { id: "Voice",    icon: "\u25C8", href: "/voice" },
   { id: "Settings", icon: "\u2699", href: "/settings" },
 ];

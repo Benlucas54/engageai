@@ -13,7 +13,8 @@ import { MiniLabel } from "@/components/ui/MiniLabel";
 import { Divider } from "@/components/ui/Divider";
 
 export function OverviewView() {
-  const { comments } = useComments();
+  const { comments, refetch: refetchComments } = useComments();
+  const [refreshing, setRefreshing] = useState(false);
   const agentRun = useAgentStatus();
   const [runState, setRunState] = useState<"idle" | "starting" | "running">("idle");
 
@@ -41,20 +42,17 @@ export function OverviewView() {
     }
   }, [runState, isAgentRunning]);
 
-  const repliedUsernames = new Set(
-    comments
-      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
-      .map((c) => c.username),
-  );
-  const replied = comments.filter((c) => c.status === "replied").length;
-  const flagged = comments.filter(
-    (c) => c.status === "flagged" && !repliedUsernames.has(c.username),
-  ).length;
+  const replied = comments.filter((c) => c.replies?.some((r) => r.sent_at)).length;
+  const flagged = comments.filter((c) => {
+    if (c.status !== "flagged" && c.status !== "pending") return false;
+    if (c.replies?.some((r) => r.sent_at)) return false;
+    return true;
+  }).length;
 
   const platforms = (["instagram", "threads", "x"] as const).map((p) => {
     const total = comments.filter((c) => c.platform === p).length;
     const auto = comments.filter(
-      (c) => c.platform === p && c.status === "replied"
+      (c) => c.platform === p && c.replies?.some((r) => r.sent_at)
     ).length;
     return { p, total, auto };
   });
@@ -70,24 +68,38 @@ export function OverviewView() {
               ? `Last run ${timeAgo(agentRun.completed_at)}`
               : "Agent has not run yet"}
         </MiniLabel>
-        <Btn
-          size="sm"
-          onClick={handleRunNow}
-          disabled={runState !== "idle" || isAgentRunning}
-        >
-          {runState === "starting"
-            ? "Starting…"
-            : isAgentRunning
-              ? "Running…"
-              : "Run Now"}
-        </Btn>
+        <div className="flex gap-2">
+          <Btn
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              setRefreshing(true);
+              await refetchComments();
+              setRefreshing(false);
+            }}
+            disabled={refreshing}
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </Btn>
+          <Btn
+            size="sm"
+            onClick={handleRunNow}
+            disabled={runState !== "idle" || isAgentRunning}
+          >
+            {runState === "starting"
+              ? "Starting…"
+              : isAgentRunning
+                ? "Running…"
+                : "Run Now"}
+          </Btn>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2.5">
         {[
           { label: "Total today", val: comments.length, tag: null },
           { label: "Auto-handled", val: replied, tag: "replied" as const },
-          { label: "Needs attention", val: flagged, tag: "flagged" as const },
+          { label: "Inbox", val: flagged, tag: "flagged" as const },
         ].map(({ label, val, tag }) => (
           <Card key={label}>
             <MiniLabel>{label}</MiniLabel>
@@ -96,7 +108,7 @@ export function OverviewView() {
             </div>
             {tag && (
               <Tag type={tag}>
-                {tag === "replied" ? "Auto-replied" : "Flagged"}
+                {tag === "replied" ? "Auto-replied" : "Needs reply"}
               </Tag>
             )}
           </Card>
@@ -128,9 +140,9 @@ export function OverviewView() {
         </div>
       </Card>
 
-      {/* Flagged nudge */}
+      {/* Inbox nudge */}
       {flagged > 0 && (
-        <Link href="/flagged" className="no-underline">
+        <Link href="/inbox" className="no-underline">
           <Card className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <Tag type="flagged">Action needed</Tag>
@@ -139,7 +151,7 @@ export function OverviewView() {
                   {flagged} comments waiting for your reply
                 </div>
                 <div className="text-xs text-content-faint mt-0.5">
-                  Pricing questions · founder enquiries
+                  Unengaged comments needing your reply
                 </div>
               </div>
             </div>
@@ -169,7 +181,7 @@ export function OverviewView() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <Tag type={c.status}>{c.status}</Tag>
+                  <Tag type={c.status}>{c.status === "flagged" ? "inbox" : c.status}</Tag>
                   <span className="text-[11px] text-content-faint">
                     {timeAgo(c.created_at)}
                   </span>

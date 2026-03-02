@@ -1,4 +1,4 @@
-import type { ScrapedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
+import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 
 function isPostPage(): boolean {
   return /threads\.(net|com)\/@[\w.]+\/post\//.test(window.location.href);
@@ -213,8 +213,14 @@ function hasOwnerLiked(card: Element): boolean {
   return false;
 }
 
-function scrapeActivityPage(ownerUsername: string): ScrapedComment[] {
+interface ScrapeActivityResult {
+  comments: ScrapedComment[];
+  engagedComments: EngagedComment[];
+}
+
+function scrapeActivityPage(ownerUsername: string): ScrapeActivityResult {
   const comments: ScrapedComment[] = [];
+  const engagedComments: EngagedComment[] = [];
 
   console.log(`[EngageAI] Scraping activity page. Owner: @${ownerUsername || "(unknown)"}`);
 
@@ -238,9 +244,13 @@ function scrapeActivityPage(ownerUsername: string): ScrapedComment[] {
     // Skip cards with < 2 texts (like/mention notifications)
     if (texts.length < 2) continue;
 
+    const text = texts[texts.length - 1];
+    if (!text) continue;
+
     // Check if the owner already LIKED this comment
     if (hasOwnerLiked(card)) {
       console.log(`[EngageAI] Skip @${username}: owner already liked`);
+      engagedComments.push({ username, comment_text: text });
       continue;
     }
 
@@ -251,12 +261,9 @@ function scrapeActivityPage(ownerUsername: string): ScrapedComment[] {
     const ownerTextFreq = textFrequency.get(ownerText) || 0;
     if (ownerTextFreq <= 1) {
       console.log(`[EngageAI] Skip @${username}: owner already replied ("${ownerText.slice(0, 40)}…")`);
+      engagedComments.push({ username, comment_text: text });
       continue;
     }
-
-    // Take the LAST text — that's the commenter's reply
-    const text = texts[texts.length - 1];
-    if (!text) continue;
 
     const extId = `th:${username}:${[...text].slice(0, 30).join("")}`;
     if (seenIds.has(extId)) continue;
@@ -275,14 +282,14 @@ function scrapeActivityPage(ownerUsername: string): ScrapedComment[] {
     });
   }
 
-  console.log(`[EngageAI] Total scraped: ${comments.length}`);
-  return comments;
+  console.log(`[EngageAI] Total scraped: ${comments.length}, engaged: ${engagedComments.length}`);
+  return { comments, engagedComments };
 }
 
-function scrape(ownerUsername: string): ScrapedComment[] {
-  if (isPostPage()) return scrapePostPage();
+function scrape(ownerUsername: string): ScrapeActivityResult {
+  if (isPostPage()) return { comments: scrapePostPage(), engagedComments: [] };
   if (isActivityPage()) return scrapeActivityPage(ownerUsername);
-  return [];
+  return { comments: [], engagedComments: [] };
 }
 
 async function postReply(
@@ -350,8 +357,8 @@ chrome.runtime.onMessage.addListener(
     sendResponse: (response: ContentScriptResponse) => void
   ) => {
     if (message.action === "SCRAPE") {
-      const comments = scrape(message.ownerUsername || "");
-      sendResponse({ success: true, comments });
+      const { comments, engagedComments } = scrape(message.ownerUsername || "");
+      sendResponse({ success: true, comments, engagedComments });
     }
 
     if (message.action === "POST_REPLY") {

@@ -17,19 +17,16 @@ export function FlaggedView() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [done, setDone] = useState<FlaggedComment[]>([]);
 
-  // Usernames where the owner has already replied to at least one of their comments
-  const repliedUsernames = new Set(
-    comments
-      .filter((c) => c.replies?.some((r) => r.sent_at && !r.draft_text))
-      .map((c) => c.username)
-  );
-
   const flagged: FlaggedComment[] = comments
-    .filter((c) => c.status === "flagged" && !repliedUsernames.has(c.username))
+    .filter((c) => {
+      if (c.status !== "flagged" && c.status !== "pending") return false;
+      if (c.replies?.some((r) => r.sent_at)) return false;
+      return true;
+    })
     .map((c) => ({
       ...c,
       draft:
-        c.replies?.[0]?.draft_text || c.replies?.[0]?.reply_text || "",
+        c.replies?.[0]?.reply_text || c.replies?.[0]?.draft_text || "",
       replyId: c.replies?.[0]?.id,
     }));
 
@@ -44,7 +41,7 @@ export function FlaggedView() {
     if (c.replyId) {
       await getSupabase()
         .from("replies")
-        .update({ draft_text: draftText, approved: true } as never)
+        .update({ draft_text: draftText, reply_text: draftText, approved: true } as never)
         .eq("id", c.replyId);
     }
     setDone((p) => [...p, c]);
@@ -79,7 +76,7 @@ export function FlaggedView() {
                 @{c.username}
               </span>
               <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
-              <Tag type="flagged">Flagged</Tag>
+              <Tag type="flagged">Inbox</Tag>
             </div>
             <span className="text-[11px] text-content-faint">
               {timeAgo(c.created_at)}

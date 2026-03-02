@@ -125,6 +125,30 @@ async function handleScrape(
     action: "SCRAPE",
     ownerUsername,
   });
+
+  // Mark engaged comments (liked/replied externally) as "replied" in Supabase
+  if (response?.engagedComments?.length) {
+    console.log(`[EngageAI] ${response.engagedComments.length} engaged comments to reconcile`);
+    for (const ec of response.engagedComments) {
+      const { data: match } = await supabase
+        .from("comments")
+        .select("id, status")
+        .eq("platform", platform)
+        .eq("username", ec.username)
+        .eq("comment_text", ec.comment_text)
+        .in("status", ["pending", "flagged"])
+        .limit(1)
+        .single();
+      if (match) {
+        await supabase
+          .from("comments")
+          .update({ status: "replied" })
+          .eq("id", match.id);
+        console.log(`[EngageAI] Marked @${ec.username} comment as replied (engaged externally)`);
+      }
+    }
+  }
+
   if (!response?.success || !response.comments?.length) {
     return [];
   }
@@ -159,24 +183,54 @@ async function handleScrape(
 
     console.log(`[EngageAI] Matched to current scan:`, matched.length);
 
-    if (matched.length > 0) {
-      const results: ScanResult[] = [];
-      for (const comment of matched) {
-        const { data: reply } = await supabase
-          .from("replies")
-          .select("*")
-          .eq("comment_id", comment.id)
-          .limit(1)
-          .single();
-        results.push({
-          comment,
-          reply: reply || undefined,
-          status: comment.status === "flagged" ? "flagged" : "auto-approved",
-        });
-      }
-      return results;
+    // Mark unmatched flagged/pending comments as "replied" — if the extension
+    // doesn't see them as unengaged, the owner has already dealt with them.
+    const unmatched = (existing || []).filter(
+      (c) => !scrapedKeys.has(`${c.username}:${c.comment_text}`)
+    );
+    for (const c of unmatched) {
+      await supabase
+        .from("comments")
+        .update({ status: "replied" })
+        .eq("id", c.id);
+      console.log(`[EngageAI] Reconciled @${c.username} as replied (not found in scan)`);
     }
-    return [];
+
+    const results: ScanResult[] = [];
+    for (const comment of matched) {
+      const { data: reply } = await supabase
+        .from("replies")
+        .select("*")
+        .eq("comment_id", comment.id)
+        .limit(1)
+        .single();
+      results.push({
+        comment,
+        reply: reply || undefined,
+        status: comment.status === "flagged" ? "flagged" : "auto-approved",
+      });
+    }
+    return results;
+  }
+
+  // Reconcile stale flagged/pending comments not found in this scan
+  const scrapedKeys = new Set(
+    scraped.map((c) => `${c.username}:${c.comment_text}`)
+  );
+  const { data: staleComments } = await supabase
+    .from("comments")
+    .select("id, username, comment_text")
+    .eq("platform", platform)
+    .in("status", ["pending", "flagged"])
+    .limit(100);
+  for (const c of (staleComments || [])) {
+    if (!scrapedKeys.has(`${c.username}:${c.comment_text}`)) {
+      await supabase
+        .from("comments")
+        .update({ status: "replied" })
+        .eq("id", c.id);
+      console.log(`[EngageAI] Reconciled @${c.username} as replied (not found in scan)`);
+    }
   }
 
   // Get voice settings for reply generation
@@ -297,7 +351,7 @@ async function handleApprove(
 ): Promise<void> {
   await supabase
     .from("replies")
-    .update({ approved: true, reply_text: replyText })
+    .update({ approved: true, reply_text: replyText, draft_text: replyText })
     .eq("id", replyId);
 
   const settings = await getSettings();

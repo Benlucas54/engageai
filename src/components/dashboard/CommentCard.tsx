@@ -34,7 +34,7 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
           )}
         </div>
         <div className="flex gap-1.5 items-center shrink-0">
-          <Tag type={c.status}>{c.status}</Tag>
+          <Tag type={c.status}>{c.status === "flagged" ? "inbox" : c.status}</Tag>
           <span className="text-[11px] text-content-faint">
             {timeAgo(c.created_at)}
           </span>
