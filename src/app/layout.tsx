@@ -14,8 +14,6 @@ const playfair = Playfair_Display({
   weight: ["400", "500"],
 });
 
-export const dynamic = "force-dynamic";
-
 export const metadata: Metadata = {
   title: "EngageAI",
 };
