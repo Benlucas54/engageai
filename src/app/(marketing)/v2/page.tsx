@@ -6,9 +6,17 @@ import Link from "next/link";
 import { getSupabase } from "@/lib/supabase";
 import { Card } from "@/components/ui/Card";
 import { Tag } from "@/components/ui/Tag";
-import { P_LABEL, SMART_TAG_LABELS } from "@/lib/constants";
+import { P_LABEL } from "@/lib/constants";
 
 /* ─── Mock data ─────────────────────────────────────────── */
+
+const SMART_TAG_LABELS: Record<string, string> = {
+  purchase_intent: "Purchase Intent",
+  complaint: "Complaint",
+  question: "Question",
+  compliment: "Compliment",
+  other: "Other",
+};
 
 const PLATFORMS = Object.entries(P_LABEL);
 
