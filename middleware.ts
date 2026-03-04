@@ -26,6 +26,6 @@ export const config = {
      * - /_next (Next.js internals)
      * - Static files (favicon, images, etc.)
      */
-    "/((?!$|v2|login|auth/callback|api/telegram|api/generate-reply|api/tag-comments|api/summarize-profiles|api/enhance-voice|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!$|v2|login|auth/callback|api/telegram|api/generate-reply|api/tag-comments|api/smart-tags|api/summarize-profiles|api/enhance-voice|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -3,16 +3,21 @@
 import { useState, useEffect, useCallback } from "react";
 import type { VoiceFormData } from "@/lib/types";
 
-export function useVoiceSettings() {
+export function useVoiceSettings(voiceId?: string) {
   const [voice, setVoice] = useState<VoiceFormData | null>(null);
 
   const fetchVoice = useCallback(async () => {
-    const res = await fetch("/api/voice");
+    if (!voiceId) {
+      setVoice(null);
+      return;
+    }
+    const res = await fetch(`/api/voice?voice_id=${voiceId}`);
     if (!res.ok) return;
     const d = await res.json();
     if (d) {
       setVoice({
         id: d.id,
+        name: d.name || "",
         tone: d.tone,
         phrases: d.signature_phrases,
         avoid: d.avoid,
@@ -21,7 +26,7 @@ export function useVoiceSettings() {
         platform_tones: d.platform_tones || {},
       });
     }
-  }, []);
+  }, [voiceId]);
 
   useEffect(() => {
     fetchVoice();
@@ -33,6 +38,7 @@ export function useVoiceSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: v.id,
+        name: v.name,
         tone: v.tone,
         signature_phrases: v.phrases,
         avoid: v.avoid,

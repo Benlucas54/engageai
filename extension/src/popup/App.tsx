@@ -88,8 +88,8 @@ function Tag({
         backgroundColor: c.bg,
         color: c.text,
         border: `1px solid ${c.border}`,
-        padding: "2px 8px",
-        borderRadius: "4px",
+        padding: "3px 10px",
+        borderRadius: "9999px",
         fontSize: "11px",
         fontWeight: 500,
         whiteSpace: "nowrap",
@@ -164,6 +164,8 @@ type TabId = "scan" | "queue" | "settings";
 
 function ScanTab() {
   const [scanning, setScanning] = useState(false);
+  const [scanningFollowers, setScanningFollowers] = useState(false);
+  const [followerScanResult, setFollowerScanResult] = useState<string | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -280,15 +282,49 @@ function ScanTab() {
         </div>
       )}
 
-      <Btn
-        variant="primary"
-        size="md"
-        onClick={handleScan}
-        disabled={scanning}
-        style={{ width: "100%", marginBottom: "16px" }}
-      >
-        {scanning ? "Scanning..." : "Scan"}
-      </Btn>
+      <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+        <Btn
+          variant="primary"
+          size="md"
+          onClick={handleScan}
+          disabled={scanning}
+          style={{ flex: 1 }}
+        >
+          {scanning ? "Scanning..." : "Scan"}
+        </Btn>
+        <Btn
+          variant="secondary"
+          size="md"
+          onClick={async () => {
+            setScanningFollowers(true);
+            setFollowerScanResult(null);
+            try {
+              const res = await chrome.runtime.sendMessage({ action: "SCAN_FOLLOWERS" });
+              setFollowerScanResult(res.success ? `Checked ${res.platform} followers` : (res.error || "Failed"));
+            } catch (err) {
+              setFollowerScanResult(err instanceof Error ? err.message : "Error");
+            }
+            setScanningFollowers(false);
+          }}
+          disabled={scanningFollowers}
+          style={{ flex: 1 }}
+        >
+          {scanningFollowers ? "Checking..." : "Check Followers"}
+        </Btn>
+      </div>
+      {followerScanResult && (
+        <div style={{
+          fontSize: "11px",
+          color: "#4a7c59",
+          backgroundColor: "#f0f7ee",
+          border: "1px solid #cfe5c9",
+          borderRadius: "6px",
+          padding: "8px 10px",
+          marginBottom: "12px",
+        }}>
+          {followerScanResult}
+        </div>
+      )}
 
       {error && (
         <div
@@ -340,7 +376,7 @@ function ScanTab() {
             style={{
               backgroundColor: "#ffffff",
               border: "1px solid #e9e6e0",
-              borderRadius: "8px",
+              borderRadius: "10px",
               padding: "12px",
               marginBottom: "10px",
               opacity: isSent ? 0.7 : 1,
@@ -381,7 +417,7 @@ function ScanTab() {
               <div
                 style={{
                   backgroundColor: "#f7f6f3",
-                  borderRadius: "6px",
+                  borderRadius: "7px",
                   padding: "8px 10px",
                   marginBottom: isActionable ? "8px" : "0",
                 }}
@@ -404,7 +440,7 @@ function ScanTab() {
                       width: "100%",
                       fontSize: "12px",
                       border: "1px solid #e9e6e0",
-                      borderRadius: "4px",
+                      borderRadius: "7px",
                       padding: "6px",
                       resize: "vertical",
                       minHeight: "50px",
@@ -560,6 +596,15 @@ function SendProgress({ step }: { step: string }) {
 
 function QueueTab() {
   const [queue, setQueue] = useState<QueuedReply[]>([]);
+  const [followerQueue, setFollowerQueue] = useState<Array<{
+    action_id: string;
+    follower_username: string;
+    platform: string;
+    message_type: string;
+    message_text: string;
+    scheduled_for: number;
+    status: string;
+  }>>([]);
   const [sendStatus, setSendStatus] = useState<{
     step: string;
     username: string;
@@ -568,8 +613,9 @@ function QueueTab() {
   } | null>(null);
 
   useEffect(() => {
-    chrome.storage.local.get(["queue", "send_status"], (result) => {
+    chrome.storage.local.get(["queue", "follower_queue", "send_status"], (result) => {
       setQueue(result.queue || []);
+      setFollowerQueue(result.follower_queue || []);
       if (result.send_status) setSendStatus(result.send_status);
     });
     const listener = (
@@ -578,6 +624,7 @@ function QueueTab() {
     ) => {
       if (area === "local") {
         if (changes.queue) setQueue(changes.queue.newValue || []);
+        if (changes.follower_queue) setFollowerQueue(changes.follower_queue.newValue || []);
         if (changes.send_status) setSendStatus(changes.send_status.newValue || null);
       }
     };
@@ -614,7 +661,7 @@ function QueueTab() {
 
   return (
     <div style={{ padding: "16px" }}>
-      {active.length === 0 && sent.length === 0 && (
+      {active.length === 0 && sent.length === 0 && followerQueue.length === 0 && (
         <div
           style={{
             color: "#78746e",
@@ -625,6 +672,50 @@ function QueueTab() {
         >
           No replies in the queue
         </div>
+      )}
+
+      {/* Follower action queue */}
+      {followerQueue.length > 0 && (
+        <>
+          <h3
+            style={{
+              fontSize: "11px",
+              fontWeight: 600,
+              color: "#78746e",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              marginBottom: "10px",
+            }}
+          >
+            Follower Actions ({followerQueue.length})
+          </h3>
+          {followerQueue.map((item) => (
+            <div
+              key={item.action_id}
+              style={{
+                backgroundColor: "#ffffff",
+                border: "1px solid #e9e6e0",
+                borderRadius: "10px",
+                padding: "12px",
+                marginBottom: "10px",
+              }}
+            >
+              <div style={{ display: "flex", gap: "6px", alignItems: "center", marginBottom: "6px" }}>
+                <Tag label={item.platform} color={item.platform} />
+                <Tag label={item.message_type === "dm" ? "DM" : "Comment"} color={item.message_type === "dm" ? "pending" : "flagged"} />
+                <span style={{ fontSize: "12px", fontWeight: 600, color: "#1c1917" }}>
+                  @{item.follower_username}
+                </span>
+              </div>
+              <p style={{ fontSize: "12px", color: "#1c1917", lineHeight: "1.4", marginBottom: "4px" }}>
+                {item.message_text}
+              </p>
+              <span style={{ fontSize: "11px", color: "#78746e" }}>
+                {item.status === "queued" ? `Scheduled: ${formatTime(item.scheduled_for)}` : item.status}
+              </span>
+            </div>
+          ))}
+        </>
       )}
 
       {active.length > 0 && (
@@ -652,7 +743,7 @@ function QueueTab() {
                 style={{
                   backgroundColor: "#ffffff",
                   border: `1px solid ${isFailed ? "#f0cece" : isSending ? "#c5d5f0" : "#e9e6e0"}`,
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   padding: "12px",
                   marginBottom: "10px",
                 }}
@@ -720,7 +811,7 @@ function QueueTab() {
               textTransform: "uppercase",
               letterSpacing: "0.05em",
               marginBottom: "10px",
-              marginTop: queued.length > 0 ? "16px" : 0,
+              marginTop: active.length > 0 ? "16px" : 0,
             }}
           >
             Recently Sent
@@ -731,7 +822,7 @@ function QueueTab() {
               style={{
                 backgroundColor: "#ffffff",
                 border: "1px solid #e9e6e0",
-                borderRadius: "8px",
+                borderRadius: "10px",
                 padding: "12px",
                 marginBottom: "10px",
                 opacity: 0.7,
@@ -758,10 +849,14 @@ function QueueTab() {
 function SettingsTab() {
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [threshold, setThreshold] = useState<string>("");
+  const [followerScanEnabled, setFollowerScanEnabled] = useState(true);
+  const [followerScanInterval, setFollowerScanInterval] = useState(30);
 
   useEffect(() => {
-    chrome.storage.local.get("settings", ({ settings: s }) => {
-      if (s) setSettings(s);
+    chrome.storage.local.get(["settings", "follower_scan_enabled", "follower_scan_interval_minutes"], (result) => {
+      if (result.settings) setSettings(result.settings);
+      if (result.follower_scan_enabled !== undefined) setFollowerScanEnabled(result.follower_scan_enabled);
+      if (result.follower_scan_interval_minutes) setFollowerScanInterval(result.follower_scan_interval_minutes);
     });
     supabase
       .from("voice_settings")
@@ -822,7 +917,7 @@ function SettingsTab() {
           style={{
             backgroundColor: "#ffffff",
             border: "1px solid #e9e6e0",
-            borderRadius: "6px",
+            borderRadius: "7px",
             padding: "10px 12px",
             fontSize: "12px",
             color: "#1c1917",
@@ -856,7 +951,7 @@ function SettingsTab() {
           style={{
             width: "100%",
             border: "1px solid #e9e6e0",
-            borderRadius: "6px",
+            borderRadius: "7px",
             padding: "10px 12px",
             fontSize: "12px",
             fontFamily: "inherit",
@@ -874,6 +969,62 @@ function SettingsTab() {
           <option value={15}>Every 15 minutes</option>
           <option value={30}>Every 30 minutes</option>
           <option value={60}>Every hour</option>
+        </select>
+      </div>
+
+      {/* Follower scan settings */}
+      <div style={{ marginBottom: "20px" }}>
+        <label
+          style={{
+            display: "block",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#78746e",
+            textTransform: "uppercase",
+            letterSpacing: "0.05em",
+            marginBottom: "6px",
+          }}
+        >
+          Follower Scan
+        </label>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={followerScanEnabled}
+              onChange={(e) => {
+                setFollowerScanEnabled(e.target.checked);
+                chrome.storage.local.set({ follower_scan_enabled: e.target.checked });
+              }}
+              style={{ accentColor: "#1c1917" }}
+            />
+            Enabled
+          </label>
+        </div>
+        <select
+          value={followerScanInterval}
+          onChange={(e) => {
+            const val = Number(e.target.value);
+            setFollowerScanInterval(val);
+            chrome.storage.local.set({ follower_scan_interval_minutes: val });
+          }}
+          style={{
+            width: "100%",
+            border: "1px solid #e9e6e0",
+            borderRadius: "7px",
+            padding: "10px 12px",
+            fontSize: "12px",
+            fontFamily: "inherit",
+            color: "#1c1917",
+            backgroundColor: "#ffffff",
+            cursor: "pointer",
+            appearance: "auto",
+          }}
+        >
+          <option value={15}>Every 15 minutes</option>
+          <option value={30}>Every 30 minutes</option>
+          <option value={60}>Every hour</option>
+          <option value={120}>Every 2 hours</option>
         </select>
       </div>
 
@@ -905,7 +1056,7 @@ function SettingsTab() {
                 }}
                 style={{
                   border: "1px solid #e9e6e0",
-                  borderRadius: "4px",
+                  borderRadius: "7px",
                   padding: "6px 8px",
                   fontSize: "12px",
                   fontFamily: "inherit",
@@ -1058,23 +1209,24 @@ export default function App() {
       style={{
         backgroundColor: "#f7f6f3",
         minHeight: "500px",
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        fontFamily: "'DM Sans', sans-serif",
         color: "#1c1917",
       }}
     >
       {/* Header */}
       <div
         style={{
-          backgroundColor: "#1c1917",
-          color: "#ffffff",
+          backgroundColor: "#ffffff",
+          borderBottom: "1px solid #e9e6e0",
           padding: "12px 16px",
-          fontSize: "14px",
-          fontWeight: 600,
-          letterSpacing: "0.02em",
         }}
       >
-        EngageAI
+        <div style={{ fontSize: "15px", fontWeight: 600, color: "#1c1917", letterSpacing: "0.02em" }}>
+          EngageAI
+        </div>
+        <div style={{ fontSize: "11px", color: "#d4d0ca" }}>
+          by Promptpreneur
+        </div>
       </div>
 
       {/* Tab bar */}

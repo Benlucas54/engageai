@@ -2,28 +2,28 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useLinkedAccounts } from "@/hooks/useLinkedAccounts";
+import { useProfiles } from "@/hooks/useProfiles";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OnboardingWizard } from "@/components/dashboard/OnboardingWizard";
 import { LayoutProvider, useLayout } from "@/contexts/LayoutContext";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { accounts, loading, refetch } = useLinkedAccounts();
+  const { profiles, loading, refetch } = useProfiles();
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const wasOnboarding = useRef(true);
 
-  // Navigate after accounts load and re-render completes
+  // Navigate after profiles load and re-render completes
   useEffect(() => {
-    if (pendingNav && accounts.length > 0) {
+    if (pendingNav && profiles.length > 0) {
       router.push(pendingNav);
       setPendingNav(null);
     }
-  }, [pendingNav, accounts.length, router]);
+  }, [pendingNav, profiles.length, router]);
 
   if (loading) return null;
 
-  if (accounts.length === 0) {
+  if (profiles.length === 0) {
     return (
       <OnboardingWizard
         onComplete={async (navigateTo?: string) => {

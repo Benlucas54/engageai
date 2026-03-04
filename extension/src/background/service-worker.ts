@@ -1,9 +1,9 @@
 import { supabase } from "../lib/supabase";
 import {
   generateReply,
-  getVoiceContext,
   detectFlagCondition,
   harvestLearnedExamples,
+  tagComments,
 } from "../lib/claude";
 import {
   getQueue,
@@ -11,6 +11,7 @@ import {
   updateQueueItem,
   removeFromQueue,
   getSettings,
+  updateSettings,
   updateBadge,
 } from "../lib/storage";
 import {
@@ -18,11 +19,21 @@ import {
   getCommenterProfile,
   updateProfileSummaries,
 } from "../lib/profiles";
+import { matchAutomationRule } from "../lib/automations";
+import { matchFollowerActionRule } from "../lib/follower-actions";
 import type {
   Platform,
   ScrapedComment,
+  ScrapedFollower,
+  Comment,
   QueuedReply,
+  QueuedFollowerAction,
   ScanResult,
+  AutomationRule,
+  FollowerActionRule,
+  Follower,
+  CommentMark,
+  SmartTag,
 } from "../lib/types";
 
 const SPAM_KEYWORDS = [
@@ -47,29 +58,33 @@ function detectPlatform(url: string): Platform | null {
   return null;
 }
 
+function normalizeDedup(s: string): string {
+  return s.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
 async function deduplicateComments(
   comments: ScrapedComment[]
 ): Promise<ScrapedComment[]> {
-  const sevenDaysAgo = new Date(
-    Date.now() - 7 * 24 * 60 * 60 * 1000
+  const thirtyDaysAgo = new Date(
+    Date.now() - 30 * 24 * 60 * 60 * 1000
   ).toISOString();
   const { data: existing, error: dedupErr } = await supabase
     .from("comments")
     .select("platform, username, comment_text")
-    .gte("synced_at", sevenDaysAgo);
+    .gte("synced_at", thirtyDaysAgo);
 
   console.log(`[EngageAI] Dedup: ${existing?.length ?? 0} existing comments in DB, error:`, dedupErr?.message);
 
   const existingKeys = new Set(
     (existing || []).map(
       (c: { platform: string; username: string; comment_text: string }) =>
-        `${c.platform}:${c.username}:${c.comment_text}`
+        `${normalizeDedup(c.platform)}:${normalizeDedup(c.username)}:${normalizeDedup(c.comment_text)}`
     )
   );
 
   const seen = new Set<string>();
   return comments.filter((c) => {
-    const key = `${c.platform}:${c.username}:${c.comment_text}`;
+    const key = `${normalizeDedup(c.platform)}:${normalizeDedup(c.username)}:${normalizeDedup(c.comment_text)}`;
     if (existingKeys.has(key) || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -222,10 +237,25 @@ async function handleScrape(
     return results;
   }
 
-  // Get voice settings, documents, and examples for reply generation
-  const { voice, docContext, examples } = await getVoiceContext();
+  // Get voice settings for flag detection (reply generation is now server-side)
+  const { data: voice } = await supabase
+    .from("voice_settings")
+    .select("*")
+    .limit(1)
+    .single();
+
+  // Fetch enabled automation rules, ordered by priority DESC
+  const { data: automationRules } = await supabase
+    .from("automation_rules")
+    .select("*")
+    .eq("enabled", true)
+    .order("priority", { ascending: false });
+
   const settings = await getSettings();
   const results: ScanResult[] = [];
+
+  // Phase 1: Insert all non-spam comments
+  const insertedComments: { inserted: Comment; original: ScrapedComment }[] = [];
 
   for (const comment of newComments) {
     // Skip spam
@@ -257,14 +287,68 @@ async function handleScrape(
       continue;
     }
     console.log(`[EngageAI] Inserted comment ${inserted.id} from @${comment.username}`);
+    insertedComments.push({ inserted: inserted as Comment, original: comment });
+  }
+
+  // Phase 2: Batch-tag all inserted comments via /api/tag-comments
+  const tagMap: Record<string, SmartTag> = insertedComments.length > 0
+    ? await tagComments(
+        insertedComments.map(({ inserted, original }) => ({
+          id: inserted.id,
+          comment_text: original.comment_text,
+          post_title: original.post_title,
+          platform: original.platform,
+        }))
+      )
+    : {};
+
+  console.log(`[EngageAI] Tagged ${Object.keys(tagMap).length} comments`);
+
+  // Phase 3: For each comment, match rules (with smart_tag) → generate reply → flag/queue
+  for (const { inserted, original: comment } of insertedComments) {
+    const smartTag = tagMap[inserted.id] || null;
+    const forceFlag = platform === "x";
+
+    // Check automation rules with smart tag
+    const matchedRule = matchAutomationRule(
+      comment.comment_text,
+      comment.platform,
+      (automationRules as AutomationRule[]) || [],
+      smartTag
+    );
 
     // Generate reply
     try {
-      const profile = await getCommenterProfile(comment.platform, comment.username);
-      const replyText = await generateReply(comment, voice, docContext, examples, profile);
-      const shouldFlag =
-        forceFlag ||
-        detectFlagCondition(comment.comment_text, voice.auto_threshold);
+      let replyText: string;
+      let shouldFlag: boolean;
+
+      if (matchedRule && !forceFlag) {
+        // Automation rule matched
+        console.log(`[EngageAI] Rule "${matchedRule.name}" matched for @${comment.username}`);
+
+        if (matchedRule.action_type === "fixed" && matchedRule.fixed_template) {
+          replyText = matchedRule.fixed_template.replace(
+            /\{username\}/g,
+            comment.username
+          );
+        } else {
+          const profile = await getCommenterProfile(comment.platform, comment.username);
+          replyText = await generateReply(
+            comment,
+            profile,
+            matchedRule.ai_instruction || undefined
+          );
+        }
+
+        shouldFlag = !matchedRule.auto_send;
+      } else {
+        // Default path — no rule matched
+        const profile = await getCommenterProfile(comment.platform, comment.username);
+        replyText = await generateReply(comment, profile);
+        shouldFlag =
+          forceFlag ||
+          detectFlagCondition(comment.comment_text, voice.auto_threshold, smartTag);
+      }
 
       const { data: reply } = await supabase
         .from("replies")
@@ -274,6 +358,7 @@ async function handleScrape(
           draft_text: replyText,
           approved: !shouldFlag,
           auto_sent: !shouldFlag,
+          ...(matchedRule ? { automation_rule_id: matchedRule.id } : {}),
         })
         .select()
         .single();
@@ -405,12 +490,19 @@ async function pollScanRequests(): Promise<void> {
       ["threads", "threads.net"],
       ["x", "x.com"],
       ["linkedin", "linkedin.com"],
+      ["tiktok", "tiktok.com"],
     ];
+
+    const platformsWithNoTabs: string[] = [];
 
     for (const [platform, urlPattern] of platformUrlPatterns) {
       if (!enabledPlatforms.has(platform)) continue;
 
       const tabs = await chrome.tabs.query({ url: `*://*.${urlPattern}/*` });
+      if (tabs.length === 0) {
+        platformsWithNoTabs.push(platform);
+        continue;
+      }
       for (const tab of tabs) {
         if (!tab.id || !tab.url) continue;
         console.log(`[EngageAI] Scanning open ${platform} tab: ${tab.url}`);
@@ -427,6 +519,11 @@ async function pollScanRequests(): Promise<void> {
       }
     }
 
+    // Build error message if some/all platforms had no open tabs
+    const noTabsMessage = platformsWithNoTabs.length > 0
+      ? `No open tabs found for: ${platformsWithNoTabs.join(", ")}`
+      : undefined;
+
     // Update agent_runs with results
     await supabase
       .from("agent_runs")
@@ -436,6 +533,7 @@ async function pollScanRequests(): Promise<void> {
         comments_found: commentsFound,
         replies_sent: repliesSent,
         flagged_count: flaggedCount,
+        ...(noTabsMessage ? { error_message: noTabsMessage } : {}),
       })
       .eq("id", run.id);
 
@@ -490,6 +588,7 @@ async function autoScan(): Promise<void> {
     ["threads", "threads.net"],
     ["x", "x.com"],
     ["linkedin", "linkedin.com"],
+    ["tiktok", "tiktok.com"],
   ];
   for (const [platform, urlPattern] of platformUrlPatterns) {
     if (!enabledPlatforms.has(platform)) continue;
@@ -665,6 +764,414 @@ async function pollDashboardApprovals(): Promise<void> {
   await runBatch();
 }
 
+// --- Follower scan pipeline ---
+
+async function getFollowerQueue(): Promise<QueuedFollowerAction[]> {
+  const { follower_queue = [] } = await chrome.storage.local.get("follower_queue");
+  return follower_queue;
+}
+
+async function addToFollowerQueue(item: QueuedFollowerAction): Promise<void> {
+  const queue = await getFollowerQueue();
+  queue.push(item);
+  await chrome.storage.local.set({ follower_queue: queue });
+}
+
+async function updateFollowerQueueItem(
+  actionId: string,
+  updates: Partial<QueuedFollowerAction>
+): Promise<void> {
+  const queue = await getFollowerQueue();
+  const idx = queue.findIndex((r) => r.action_id === actionId);
+  if (idx !== -1) {
+    queue[idx] = { ...queue[idx], ...updates };
+    await chrome.storage.local.set({ follower_queue: queue });
+  }
+}
+
+async function getTodayActionCounts(): Promise<{ dms: number; comments: number }> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const { data: actions } = await supabase
+    .from("follower_actions")
+    .select("message_type, sent_at")
+    .gte("sent_at", todayStart.toISOString());
+
+  let dms = 0;
+  let comments = 0;
+  for (const a of actions || []) {
+    if (a.message_type === "dm") dms++;
+    else comments++;
+  }
+  return { dms, comments };
+}
+
+async function handleFollowerScan(
+  tabId: number,
+  platform: Platform
+): Promise<void> {
+  // Only supported platforms
+  if (platform !== "instagram" && platform !== "threads" && platform !== "tiktok") return;
+
+  console.log(`[EngageAI] Follower scan: ${platform} tab ${tabId}`);
+
+  // 1. Send SCRAPE_NOTIFICATIONS to content script
+  let response: { success?: boolean; followers?: ScrapedFollower[] } | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      response = await chrome.tabs.sendMessage(tabId, {
+        action: "SCRAPE_NOTIFICATIONS",
+      });
+      break;
+    } catch {
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 2000));
+      } else {
+        console.log(`[EngageAI] Content script not available for follower scan on tab ${tabId}`);
+        return;
+      }
+    }
+  }
+
+  if (!response?.success || !response.followers?.length) {
+    console.log(`[EngageAI] No follow notifications found on ${platform}`);
+    return;
+  }
+
+  const scraped = response.followers;
+  console.log(`[EngageAI] Scraped ${scraped.length} follow notifications from ${platform}`);
+
+  // 2. Deduplicate against followers table
+  const { data: existingFollowers } = await supabase
+    .from("followers")
+    .select("username")
+    .eq("platform", platform);
+
+  const existingSet = new Set(
+    (existingFollowers || []).map((f: { username: string }) => f.username.toLowerCase())
+  );
+
+  const newFollowers = scraped.filter(
+    (f) => !existingSet.has(f.username.toLowerCase())
+  );
+
+  if (newFollowers.length === 0) {
+    console.log(`[EngageAI] All followers already known`);
+    return;
+  }
+
+  console.log(`[EngageAI] ${newFollowers.length} new followers to process`);
+
+  // 3. Insert new followers
+  for (const f of newFollowers) {
+    await supabase.from("followers").insert({
+      platform: f.platform,
+      username: f.username,
+      display_name: f.display_name || null,
+      status: "new",
+    });
+  }
+
+  // 4. Scrape profile data for each new follower
+  for (const f of newFollowers) {
+    try {
+      const profileResponse = await chrome.tabs.sendMessage(tabId, {
+        action: "SCRAPE_FOLLOWER_PROFILE",
+        username: f.username,
+      });
+
+      if (profileResponse?.success) {
+        await supabase
+          .from("followers")
+          .update({
+            bio: profileResponse.bio || null,
+            follower_count: profileResponse.follower_count || null,
+            following_count: profileResponse.following_count || null,
+            post_count: profileResponse.post_count || null,
+            has_recent_posts: profileResponse.has_recent_posts || null,
+            display_name: profileResponse.display_name || f.display_name || null,
+            profile_pic_url: profileResponse.profile_pic_url || null,
+          })
+          .eq("platform", platform)
+          .eq("username", f.username);
+      }
+
+      await new Promise((r) => setTimeout(r, 1000)); // Rate limit
+    } catch {
+      console.log(`[EngageAI] Failed to scrape profile for @${f.username}`);
+    }
+  }
+
+  // 5. Fetch action rules and match
+  const { data: actionRules } = await supabase
+    .from("follower_action_rules")
+    .select("*")
+    .eq("enabled", true)
+    .order("priority", { ascending: false });
+
+  if (!actionRules?.length) {
+    console.log(`[EngageAI] No follower action rules configured`);
+    return;
+  }
+
+  // 6. Fetch updated follower records (with profile data)
+  const { data: dbFollowers } = await supabase
+    .from("followers")
+    .select("*")
+    .eq("platform", platform)
+    .eq("status", "new")
+    .in("username", newFollowers.map((f) => f.username));
+
+  if (!dbFollowers?.length) return;
+
+  const todayCounts = await getTodayActionCounts();
+
+  for (const follower of dbFollowers as Follower[]) {
+    // Match against action rules
+    const matchedRule = matchFollowerActionRule(
+      follower,
+      platform,
+      actionRules as FollowerActionRule[]
+    );
+
+    if (!matchedRule) continue;
+
+    // Check daily caps
+    if (matchedRule.message_type === "dm" && todayCounts.dms >= matchedRule.daily_dm_cap) {
+      console.log(`[EngageAI] Daily DM cap reached for @${follower.username}`);
+      continue;
+    }
+    if (matchedRule.message_type === "comment" && todayCounts.comments >= matchedRule.daily_comment_cap) {
+      console.log(`[EngageAI] Daily comment cap reached for @${follower.username}`);
+      continue;
+    }
+
+    // Generate message
+    let messageText: string;
+    if (matchedRule.action_type === "fixed" && matchedRule.fixed_template) {
+      messageText = matchedRule.fixed_template.replace(/\{username\}/g, follower.username);
+    } else {
+      // Use AI generation
+      try {
+        const API_URL = (import.meta as Record<string, Record<string, string>>).env?.VITE_API_URL || "http://localhost:3000";
+        const res = await fetch(`${API_URL}/api/generate-follower-message`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            follower,
+            instruction: matchedRule.ai_instruction,
+            messageType: matchedRule.message_type,
+          }),
+        });
+        const data = await res.json();
+        messageText = data.message || `Hey @${follower.username}! Thanks for following!`;
+      } catch {
+        messageText = `Hey @${follower.username}! Thanks for following!`;
+      }
+    }
+
+    // Create follower action record
+    const { data: action } = await supabase
+      .from("follower_actions")
+      .insert({
+        follower_id: follower.id,
+        action_rule_id: matchedRule.id,
+        message_type: matchedRule.message_type,
+        message_text: messageText,
+        draft_text: messageText,
+        approved: matchedRule.auto_send,
+        auto_sent: matchedRule.auto_send,
+      })
+      .select()
+      .single();
+
+    if (!action) continue;
+
+    if (matchedRule.auto_send) {
+      // Add to follower action queue
+      const settings = await getSettings();
+      await addToFollowerQueue({
+        follower_id: follower.id,
+        action_id: action.id,
+        follower_username: follower.username,
+        platform: follower.platform as Platform,
+        message_type: matchedRule.message_type,
+        message_text: messageText,
+        target_post_url: null,
+        scheduled_for: getNextBatchTime(settings.batch_times, settings.jitter_minutes),
+        status: "queued",
+      });
+      todayCounts[matchedRule.message_type === "dm" ? "dms" : "comments"]++;
+      console.log(`[EngageAI] Auto-queued ${matchedRule.message_type} for @${follower.username}`);
+    } else {
+      console.log(`[EngageAI] Flagged ${matchedRule.message_type} for review: @${follower.username}`);
+    }
+  }
+}
+
+async function runFollowerBatch(): Promise<void> {
+  const queue = await getFollowerQueue();
+  const now = Date.now();
+  const due = queue.filter(
+    (r) => r.scheduled_for <= now && r.status === "queued"
+  );
+
+  for (const item of due) {
+    let windowId: number | undefined;
+    try {
+      await updateFollowerQueueItem(item.action_id, { status: "sending" });
+
+      await chrome.storage.local.set({
+        send_status: { step: "opening", username: item.follower_username, platform: item.platform, ts: Date.now() },
+      });
+
+      // Determine URL to open
+      const platformUrls: Record<string, string> = {
+        instagram: "https://www.instagram.com/",
+        threads: "https://www.threads.net/",
+        tiktok: "https://www.tiktok.com/",
+      };
+      const baseUrl = platformUrls[item.platform] || "https://www.instagram.com/";
+
+      const opened = await openMinimizedTab(baseUrl);
+      windowId = opened.windowId;
+      const tabId = opened.tabId;
+
+      // Send DM or comment
+      const action = item.message_type === "dm" ? "SEND_DM" : "COMMENT_ON_POST";
+      let response: { success?: boolean } | undefined;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          response = await chrome.tabs.sendMessage(tabId, {
+            action,
+            username: item.follower_username,
+            messageText: item.message_text,
+            postUrl: item.target_post_url || undefined,
+          });
+          break;
+        } catch {
+          console.log(`[EngageAI] ${action} attempt ${attempt + 1}/5 — content script not ready`);
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
+
+      if (response?.success) {
+        await supabase
+          .from("follower_actions")
+          .update({ sent_at: new Date().toISOString(), send_step: "done" })
+          .eq("id", item.action_id);
+        await supabase
+          .from("followers")
+          .update({ status: "actioned" })
+          .eq("id", item.follower_id);
+        await updateFollowerQueueItem(item.action_id, { status: "sent" });
+        console.log(`[EngageAI] Sent ${item.message_type} to @${item.follower_username}`);
+      } else {
+        await supabase
+          .from("follower_actions")
+          .update({ send_step: "error" })
+          .eq("id", item.action_id);
+        await updateFollowerQueueItem(item.action_id, { status: "failed" });
+      }
+
+      // Humanized delay between sends (8-20 seconds)
+      await new Promise((r) => setTimeout(r, 8000 + Math.random() * 12000));
+    } catch (err) {
+      console.error("[EngageAI] Error in follower batch send:", err);
+      await updateFollowerQueueItem(item.action_id, { status: "failed" });
+    } finally {
+      if (windowId) {
+        await chrome.windows.remove(windowId).catch(() => {});
+      }
+    }
+  }
+
+  // Remove sent items
+  const updated = await getFollowerQueue();
+  await chrome.storage.local.set({
+    follower_queue: updated.filter((r) => r.status !== "sent"),
+  });
+}
+
+async function pollFollowerApprovals(): Promise<void> {
+  // Check for follower actions approved via dashboard but not yet sent
+  const { data: pendingActions } = await supabase
+    .from("follower_actions")
+    .select("*, followers(*)")
+    .eq("approved", true)
+    .is("sent_at", null)
+    .limit(20);
+
+  if (!pendingActions?.length) return;
+
+  const queue = await getFollowerQueue();
+  const queuedIds = new Set(queue.map((q) => q.action_id));
+
+  for (const action of pendingActions) {
+    const follower = action.followers;
+    if (!follower || queuedIds.has(action.id)) continue;
+
+    await addToFollowerQueue({
+      follower_id: follower.id,
+      action_id: action.id,
+      follower_username: follower.username,
+      platform: follower.platform as Platform,
+      message_type: action.message_type,
+      message_text: action.message_text || action.draft_text || "",
+      target_post_url: action.target_post_url || null,
+      scheduled_for: Date.now(),
+      status: "queued",
+    });
+    console.log(`[EngageAI] Queued dashboard-approved follower action for @${follower.username}`);
+  }
+
+  await runFollowerBatch();
+}
+
+async function autoFollowerScan(): Promise<void> {
+  // Check if follower scanning is enabled
+  const { follower_scan_enabled = true } = await chrome.storage.local.get("follower_scan_enabled");
+  if (!follower_scan_enabled) return;
+
+  console.log("[EngageAI] Auto follower scan starting...");
+
+  const { data: accounts } = await supabase
+    .from("linked_accounts")
+    .select("platform, enabled")
+    .eq("enabled", true);
+  const enabledPlatforms = new Set(
+    (accounts || []).map((a: { platform: string }) => a.platform)
+  );
+
+  const followerPlatforms: [Platform, string][] = [
+    ["instagram", "instagram.com"],
+    ["threads", "threads.net"],
+    ["tiktok", "tiktok.com"],
+  ];
+
+  for (const [platform, urlPattern] of followerPlatforms) {
+    if (!enabledPlatforms.has(platform)) continue;
+    const tabs = await chrome.tabs.query({ url: `*://*.${urlPattern}/*` });
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url) continue;
+      // Only scan notification/activity pages
+      const url = tab.url.toLowerCase();
+      const isNotificationPage =
+        url.includes("/activity") ||
+        url.includes("/notifications") ||
+        url.includes("/accounts/activity") ||
+        url.includes("/inbox");
+      if (!isNotificationPage) continue;
+
+      try {
+        await handleFollowerScan(tab.id, platform);
+      } catch (err) {
+        console.error(`[EngageAI] Follower scan error on ${platform}:`, err);
+      }
+    }
+  }
+}
+
 function scheduleBatchAlarms(): void {
   chrome.alarms.clearAll();
   // Poll for dashboard-approved replies every minute
@@ -678,6 +1185,13 @@ function scheduleBatchAlarms(): void {
       chrome.alarms.create("auto_scan", { periodInMinutes: interval });
     }
   });
+  // Follower scan alarm (default 30 min)
+  chrome.storage.local.get("follower_scan_interval_minutes", ({ follower_scan_interval_minutes }) => {
+    const interval = follower_scan_interval_minutes || 30;
+    chrome.alarms.create("follower_scan", { periodInMinutes: interval });
+  });
+  // Poll for follower approvals every minute
+  chrome.alarms.create("poll_follower_approvals", { periodInMinutes: 1 });
 
   getSettings().then((settings) => {
     for (const time of settings.batch_times) {
@@ -733,6 +1247,9 @@ chrome.runtime.onInstalled.addListener(() => {
       scan_interval_minutes: 5,
     },
     queue: [],
+    follower_queue: [],
+    follower_scan_enabled: true,
+    follower_scan_interval_minutes: 30,
   });
   scheduleBatchAlarms();
 });
@@ -744,8 +1261,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     pollScanRequests();
   } else if (alarm.name === "auto_scan") {
     autoScan();
+  } else if (alarm.name === "follower_scan") {
+    autoFollowerScan();
+  } else if (alarm.name === "poll_follower_approvals") {
+    pollFollowerApprovals();
   } else if (alarm.name.startsWith("batch_")) {
     runBatch();
+    runFollowerBatch();
   }
 });
 
@@ -794,6 +1316,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         console.log(`[EngageAI] Manual scan: ${newResults.length} new, ${allResults.length} total`);
         sendResponse({ success: true, results: allResults, platform });
+
+        // Send MARK_COMMENTS to the content script for unengaged comments
+        const marks: CommentMark[] = allResults
+          .filter((r) => {
+            const s = r.comment.status;
+            if (s !== "pending" && s !== "flagged") return false;
+            // Exclude comments that already have a sent reply
+            if (r.reply?.sent_at) return false;
+            return true;
+          })
+          .map((r) => ({
+            comment_external_id: r.comment.comment_external_id,
+            username: r.comment.username,
+            comment_text_prefix: r.comment.comment_text.slice(0, 20),
+            status: r.comment.status as "pending" | "flagged",
+          }));
+        if (marks.length > 0) {
+          chrome.tabs.sendMessage(tab.id!, { action: "MARK_COMMENTS", marks }).catch(() => {});
+        }
       } catch (err) {
         sendResponse({
           success: false,
@@ -836,6 +1377,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     updateSettings(message.settings).then(() => {
       scheduleBatchAlarms();
       sendResponse({ success: true });
+    });
+    return true;
+  }
+
+  if (message.action === "SCAN_FOLLOWERS") {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id || !tab.url) {
+        sendResponse({ success: false, error: "No active tab" });
+        return;
+      }
+      const platform = detectPlatform(tab.url);
+      if (!platform || !["instagram", "threads", "tiktok"].includes(platform)) {
+        sendResponse({ success: false, error: `Follower scanning not supported for ${platform || "unknown"}` });
+        return;
+      }
+      try {
+        await handleFollowerScan(tab.id, platform);
+        sendResponse({ success: true, platform });
+      } catch (err) {
+        sendResponse({
+          success: false,
+          error: err instanceof Error ? err.message : "Unknown error",
+        });
+      }
     });
     return true;
   }

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { getSupabase } from "@/lib/supabase";
 import { useComments } from "@/hooks/useComments";
+import { useSmartTags } from "@/hooks/useSmartTags";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
+import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
@@ -14,8 +16,10 @@ import type { FlaggedComment } from "@/lib/types";
 
 export function FlaggedView() {
   const { comments, refetch: refetchComments } = useComments();
+  const { enabledTags, tagLabel, tagColors, tagPriority } = useSmartTags();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [done, setDone] = useState<FlaggedComment[]>([]);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
 
   const flagged: FlaggedComment[] = comments
     .filter((c) => {
@@ -30,6 +34,25 @@ export function FlaggedView() {
         c.replies?.[0]?.reply_text || c.replies?.[0]?.draft_text || "",
       replyId: c.replies?.[0]?.id,
     }));
+
+  // Tag counts for filter bar
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const tag of enabledTags) counts[tag.key] = 0;
+    for (const c of flagged) {
+      if (c.smart_tag) counts[c.smart_tag] = (counts[c.smart_tag] || 0) + 1;
+    }
+    return counts;
+  }, [flagged, enabledTags]);
+
+  const toggleFilter = (tag: string) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  };
 
   const getDraft = (c: FlaggedComment) =>
     drafts[c.id] !== undefined ? drafts[c.id] : c.draft;
@@ -57,10 +80,61 @@ export function FlaggedView() {
     refetchComments();
   };
 
-  const active = flagged.filter((c) => !done.find((d) => d.id === c.id));
+  // Filter and sort by priority
+  const active = useMemo(() => {
+    let items = flagged.filter((c) => !done.find((d) => d.id === c.id));
+
+    // Apply tag filters
+    if (activeFilters.size > 0) {
+      items = items.filter((c) => c.smart_tag && activeFilters.has(c.smart_tag));
+    }
+
+    // Sort by tag priority (highest first)
+    items.sort((a, b) => {
+      const pa = a.smart_tag ? tagPriority(a.smart_tag) : 0;
+      const pb = b.smart_tag ? tagPriority(b.smart_tag) : 0;
+      return pb - pa;
+    });
+
+    return items;
+  }, [flagged, done, activeFilters]);
+
+  const hasAnyTags = flagged.some((c) => c.smart_tag);
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Tag filter bar */}
+      {hasAnyTags && (
+        <div className="flex gap-1.5 flex-wrap">
+          {enabledTags.map((t) => {
+            const count = tagCounts[t.key] || 0;
+            if (count === 0) return null;
+            const isActive = activeFilters.has(t.key);
+            return (
+              <button
+                key={t.key}
+                onClick={() => toggleFilter(t.key)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-[5px] rounded-full text-[11px] font-medium border cursor-pointer transition-opacity ${
+                  isActive ? "opacity-100" : activeFilters.size > 0 ? "opacity-40" : "opacity-100"
+                }`}
+                style={{ background: "transparent" }}
+              >
+                <SmartTagBadge tagKey={t.key} />
+                <span className="text-[10px] text-content-faint">{count}</span>
+              </button>
+            );
+          })}
+          {activeFilters.size > 0 && (
+            <button
+              onClick={() => setActiveFilters(new Set())}
+              className="text-[11px] text-content-faint hover:text-content cursor-pointer bg-transparent border-none px-2 py-1"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
       {active.length === 0 && done.length === 0 && (
         <Card className="text-center py-[60px] px-6">
           <div className="text-[13px] text-content-faint">
@@ -77,6 +151,9 @@ export function FlaggedView() {
                 @{c.username}
               </span>
               <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
+              {c.smart_tag && (
+                <SmartTagBadge tagKey={c.smart_tag} />
+              )}
               <Tag type="flagged">Inbox</Tag>
             </div>
             <span className="text-[11px] text-content-faint">

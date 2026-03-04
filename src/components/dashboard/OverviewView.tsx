@@ -1,75 +1,23 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useMemo } from "react";
 import { useComments } from "@/hooks/useComments";
-import { useAgentStatus } from "@/hooks/useAgentStatus";
-import { useAgentActivity } from "@/hooks/useAgentActivity";
+import { useFollowerStats } from "@/hooks/useFollowerStats";
+import { useSmartTags } from "@/hooks/useSmartTags";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
+import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
 import { Divider } from "@/components/ui/Divider";
 
-const ACTIVITY_LABELS: Record<string, { icon: string; label: string; color: string }> = {
-  scanning: { icon: "...", label: "Scanning", color: "text-blue-600" },
-  liked: { icon: "\u2764", label: "Liked & queued", color: "text-pink-500" },
-  replied: { icon: "\u2713", label: "Replied", color: "text-green-600" },
-  flagged: { icon: "\u25CF", label: "Inbox", color: "text-amber-500" },
-};
-
-function AgentActivityFeed() {
-  const { items, isRunning } = useAgentActivity();
-
-  if (items.length === 0 && !isRunning) return null;
-
-  return (
-    <Card>
-      <div className="flex items-center gap-2 mb-3">
-        <MiniLabel>Agent activity</MiniLabel>
-        {isRunning && (
-          <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-        )}
-      </div>
-      {items.length === 0 && isRunning && (
-        <p className="text-[12px] text-content-faint">Scanning for new comments...</p>
-      )}
-      <div className="flex flex-col gap-1.5 max-h-[200px] overflow-y-auto">
-        {items.map((item) => {
-          const a = ACTIVITY_LABELS[item.status] || ACTIVITY_LABELS.scanning;
-          return (
-            <div key={item.id} className="flex items-center gap-2 py-1">
-              <span className={`text-[12px] ${a.color} w-4 text-center shrink-0`}>{a.icon}</span>
-              <Tag type={item.platform}>{P_LABEL[item.platform]}</Tag>
-              <span className="text-[12px] text-content font-medium">@{item.username}</span>
-              <span className="text-[11px] text-content-faint truncate flex-1">{item.text}</span>
-              <span className={`text-[11px] font-medium ${a.color} shrink-0`}>{a.label}</span>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
 export function OverviewView() {
   const { comments } = useComments();
-  const agentRun = useAgentStatus();
-  const [runState, setRunState] = useState<"idle" | "starting" | "running">("idle");
-
-  const isAgentRunning = agentRun?.status === "running";
-
-  // Sync local state with real-time agent status
-  useEffect(() => {
-    if (runState === "starting" && isAgentRunning) {
-      setRunState("running");
-    }
-    if (runState === "running" && !isAgentRunning) {
-      setRunState("idle");
-    }
-  }, [isAgentRunning, runState]);
+  const { stats: followerStats } = useFollowerStats();
+  const { enabledTags, tagColors, tagLabel, tagPriority } = useSmartTags();
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -92,39 +40,42 @@ export function OverviewView() {
     return { p, total, auto };
   });
 
+  // Tag distribution for today's comments
+  const tagDistribution = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const tag of enabledTags) counts[tag.key] = 0;
+    for (const c of todayComments) {
+      if (c.smart_tag) counts[c.smart_tag] = (counts[c.smart_tag] || 0) + 1;
+    }
+    const maxCount = Math.max(...Object.values(counts), 1);
+    return enabledTags.map((t) => ({
+      tag: t.key,
+      count: counts[t.key] || 0,
+      pct: (counts[t.key] || 0) / maxCount,
+    }));
+  }, [todayComments, enabledTags]);
+
+  const hasTagData = tagDistribution.some((t) => t.count > 0);
+
+  // Priority queue: top 5 unactioned comments sorted by tag priority
+  const priorityQueue = useMemo(() => {
+    return comments
+      .filter((c) => {
+        if (c.status !== "flagged" && c.status !== "pending") return false;
+        if (c.replies?.some((r) => r.sent_at)) return false;
+        if (c.replies?.some((r) => r.approved)) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const pa = a.smart_tag ? tagPriority(a.smart_tag) : 0;
+        const pb = b.smart_tag ? tagPriority(b.smart_tag) : 0;
+        return pb - pa;
+      })
+      .slice(0, 5);
+  }, [comments]);
+
   return (
     <div className="flex flex-col gap-3.5">
-      {/* Agent run + Stat cards */}
-      <div className="flex items-center justify-between">
-        <MiniLabel>
-          {isAgentRunning
-            ? `Agent running — started ${timeAgo(agentRun.started_at)}`
-            : agentRun?.completed_at
-              ? `Last run ${timeAgo(agentRun.completed_at)}`
-              : "Agent has not run yet"}
-        </MiniLabel>
-        <Btn
-          size="sm"
-          onClick={async () => {
-            setRunState("starting");
-            try {
-              await fetch("/api/run-now", { method: "POST" });
-              setRunState("running");
-            } catch {
-              setRunState("idle");
-            }
-          }}
-          disabled={runState === "starting"}
-        >
-          {runState === "starting"
-            ? "Restarting…"
-            : isAgentRunning
-              ? "Restart Agent"
-              : "Run Now"}
-        </Btn>
-      </div>
-
-      <AgentActivityFeed />
 
       <div className="grid grid-cols-3 gap-2.5">
         {[
@@ -171,6 +122,142 @@ export function OverviewView() {
         </div>
       </Card>
 
+      {/* Follower growth */}
+      {followerStats && followerStats.total > 0 && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <Card>
+            <MiniLabel>New followers</MiniLabel>
+            <div className="my-2.5 text-4xl font-light tracking-[-0.03em] text-content font-display leading-none">
+              {followerStats.today}
+            </div>
+            <div className="text-[11px] text-content-faint">
+              {followerStats.week} this week · {followerStats.month} this month
+            </div>
+            {/* 7-day bar chart */}
+            <div className="flex items-end gap-1 mt-3 h-[32px]">
+              {followerStats.dailyCounts.map((d) => {
+                const max = Math.max(...followerStats.dailyCounts.map((x) => x.count), 1);
+                const h = d.count > 0 ? Math.max((d.count / max) * 100, 8) : 4;
+                return (
+                  <div
+                    key={d.date}
+                    className="flex-1 rounded-sm bg-content"
+                    style={{ height: `${h}%`, opacity: d.count > 0 ? 1 : 0.15 }}
+                    title={`${d.date}: ${d.count}`}
+                  />
+                );
+              })}
+            </div>
+          </Card>
+          <Card>
+            <MiniLabel>Follower actions</MiniLabel>
+            <div className="mt-3 flex flex-col gap-2">
+              <div>
+                <div className="flex justify-between text-[11px] mb-1">
+                  <span className="text-content-sub">DMs sent today</span>
+                  <span className="text-content-faint">
+                    {followerStats.actions.dmsSentToday} / {followerStats.actions.dailyDmCap}
+                  </span>
+                </div>
+                <div className="h-[3px] bg-border-light rounded-[3px]">
+                  <div
+                    className="h-full bg-content rounded-[3px]"
+                    style={{
+                      width: `${Math.min(
+                        (followerStats.actions.dmsSentToday / followerStats.actions.dailyDmCap) * 100,
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-[11px] mb-1">
+                  <span className="text-content-sub">Comments sent today</span>
+                  <span className="text-content-faint">
+                    {followerStats.actions.commentsSentToday} / {followerStats.actions.dailyCommentCap}
+                  </span>
+                </div>
+                <div className="h-[3px] bg-border-light rounded-[3px]">
+                  <div
+                    className="h-full bg-content rounded-[3px]"
+                    style={{
+                      width: `${Math.min(
+                        (followerStats.actions.commentsSentToday / followerStats.actions.dailyCommentCap) * 100,
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Comment types today */}
+      {hasTagData && (
+        <Card>
+          <MiniLabel>Comment types today</MiniLabel>
+          <div className="mt-5 flex flex-col gap-[18px]">
+            {tagDistribution.map(({ tag, count, pct }) => (
+              <div key={tag}>
+                <div className="flex justify-between items-center mb-2">
+                  <SmartTagBadge tagKey={tag} />
+                  <span className="text-xs text-content-faint">{count}</span>
+                </div>
+                <div className="h-[3px] bg-border-light rounded-[3px]">
+                  <div
+                    className="h-full bg-content rounded-[3px]"
+                    style={{ width: `${pct * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Priority queue */}
+      {priorityQueue.length > 0 && (
+        <Card>
+          <MiniLabel>Priority queue</MiniLabel>
+          <div className="mt-4">
+            {priorityQueue.map((c, i) => (
+              <div key={c.id}>
+                <div className="flex justify-between items-start py-3.5 gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex gap-1.5 items-center mb-[5px] flex-wrap">
+                      <span className="text-xs text-content font-medium">
+                        @{c.username}
+                      </span>
+                      <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
+                      {c.smart_tag && (
+                        <SmartTagBadge tagKey={c.smart_tag} />
+                      )}
+                    </div>
+                    <p className="m-0 text-[13px] text-content-sub leading-[1.6] whitespace-nowrap overflow-hidden text-ellipsis">
+                      {c.comment_text}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-content-faint shrink-0">
+                    {timeAgo(c.created_at)}
+                  </span>
+                </div>
+                {i < priorityQueue.length - 1 && <Divider />}
+              </div>
+            ))}
+          </div>
+          <div className="mt-4">
+            <Link href="/inbox">
+              <Btn variant="ghost" size="sm">
+                Review inbox →
+              </Btn>
+            </Link>
+          </div>
+        </Card>
+      )}
+
       {/* Inbox nudge */}
       {flagged > 0 && (
         <Link href="/inbox" className="no-underline">
@@ -206,6 +293,9 @@ export function OverviewView() {
                       @{c.username}
                     </span>
                     <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
+                    {c.smart_tag && (
+                      <SmartTagBadge tagKey={c.smart_tag} />
+                    )}
                   </div>
                   <p className="m-0 text-[13px] text-content-sub leading-[1.6] whitespace-nowrap overflow-hidden text-ellipsis">
                     {c.comment_text}

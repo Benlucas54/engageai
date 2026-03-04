@@ -42,6 +42,20 @@ const config: Config = {
         "tag-x-bg":     "#f2f2f2",
         "tag-x-text":   "#555555",
         "tag-x-border": "#dddddd",
+
+        // Smart tag colors
+        "tag-purchase-bg":     "#ecfdf5",
+        "tag-purchase-text":   "#065f46",
+        "tag-purchase-border": "#a7f3d0",
+        "tag-complaint-bg":    "#fef2f2",
+        "tag-complaint-text":  "#991b1b",
+        "tag-complaint-border":"#fecaca",
+        "tag-question-bg":     "#eff6ff",
+        "tag-question-text":   "#1e40af",
+        "tag-question-border": "#bfdbfe",
+        "tag-compliment-bg":   "#fffbeb",
+        "tag-compliment-text": "#92400e",
+        "tag-compliment-border":"#fde68a",
       },
       fontFamily: {
         sans:    ["var(--font-dm-sans)", "sans-serif"],

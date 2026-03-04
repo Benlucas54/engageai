@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
 import { useVoiceDocuments } from "@/hooks/useVoiceDocuments";
 import { useVoiceExamples } from "@/hooks/useVoiceExamples";
@@ -20,6 +20,7 @@ function fmt(bytes: number): string {
 }
 
 const PLATFORMS = ["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const;
+const MAX_DOCUMENTS = 5;
 
 export function VoiceView() {
   const { voice: initialVoice, save: onSave } = useVoiceSettings();
@@ -37,6 +38,34 @@ export function VoiceView() {
   const [exReply, setExReply] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [showLearned, setShowLearned] = useState(false);
+  const [enhancing, setEnhancing] = useState<Record<string, boolean>>({});
+  const [showPhrasePrompt, setShowPhrasePrompt] = useState(false);
+  const [phrasePrompt, setPhrasePrompt] = useState("");
+
+  const enhance = async (field: "tone" | "phrases" | "avoid" | "signoff", overrideText?: string) => {
+    if (!v) return;
+    const text = overrideText ?? v[field];
+    if (!text.trim()) return;
+    setEnhancing((p) => ({ ...p, [field]: true }));
+    try {
+      const res = await fetch("/api/enhance-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field, text }),
+      });
+      if (!res.ok) throw new Error("API error");
+      const { enhanced_text } = await res.json();
+      setV((p) => (p ? { ...p, [field]: enhanced_text } : p));
+      if (field === "phrases") {
+        setShowPhrasePrompt(false);
+        setPhrasePrompt("");
+      }
+    } catch (err) {
+      console.error("[enhance] error:", err);
+    } finally {
+      setEnhancing((p) => ({ ...p, [field]: false }));
+    }
+  };
 
   useEffect(() => {
     if (initialVoice && !v) setV(initialVoice);
@@ -70,13 +99,17 @@ export function VoiceView() {
   };
 
   const handleFiles = (incoming: FileList) => {
-    const allowed = [...incoming].filter(
-      (f) =>
-        f.type === "application/pdf" ||
-        f.type === "text/plain" ||
-        f.name.endsWith(".txt") ||
-        f.name.endsWith(".pdf")
-    );
+    const slots = MAX_DOCUMENTS - files.length;
+    if (slots <= 0) return;
+    const allowed = [...incoming]
+      .filter(
+        (f) =>
+          f.type === "application/pdf" ||
+          f.type === "text/plain" ||
+          f.name.endsWith(".txt") ||
+          f.name.endsWith(".pdf")
+      )
+      .slice(0, slots);
     allowed.forEach((f) => upload(f));
   };
 
@@ -101,24 +134,73 @@ export function VoiceView() {
               label: "Avoid",
               hint: "What sounds off-brand",
             },
-            {
-              key: "signoff" as const,
-              label: "Sign-off style",
-              hint: "How you end a reply",
-            },
           ].map(({ key, label, hint }, i, arr) => (
             <div key={key}>
               <div className="flex justify-between items-baseline mb-2">
                 <span className="text-[13px] font-medium text-content">
                   {label}
                 </span>
-                <span className="text-[11px] text-content-faint">{hint}</span>
+                <div className="flex items-baseline gap-2.5">
+                  <span className="text-[11px] text-content-faint">{hint}</span>
+                  {key === "phrases" ? (
+                    <button
+                      onClick={() => setShowPhrasePrompt((p) => !p)}
+                      disabled={enhancing[key]}
+                      className="bg-transparent border border-border rounded-[5px] px-2 py-0.5 text-[11px] text-content-sub cursor-pointer font-sans hover:text-content hover:border-content disabled:opacity-30 disabled:cursor-default transition-colors"
+                    >
+                      {enhancing[key] ? "Generating\u2026" : "Generate \u2728"}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => enhance(key)}
+                      disabled={!v[key].trim() || enhancing[key]}
+                      className="bg-transparent border border-border rounded-[5px] px-2 py-0.5 text-[11px] text-content-sub cursor-pointer font-sans hover:text-content hover:border-content disabled:opacity-30 disabled:cursor-default transition-colors"
+                    >
+                      {enhancing[key] ? "Enhancing\u2026" : "Enhance \u2728"}
+                    </button>
+                  )}
+                </div>
               </div>
+              {key === "phrases" && showPhrasePrompt && (
+                <div className="mb-2 flex gap-2">
+                  <input
+                    type="text"
+                    value={phrasePrompt}
+                    onChange={(e) => setPhrasePrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && phrasePrompt.trim()) {
+                        enhance("phrases", phrasePrompt);
+                      }
+                    }}
+                    placeholder="Describe your brand voice, e.g. &quot;casual and witty, like a friend giving advice&quot;"
+                    className="flex-1 bg-surface border border-border rounded-[7px] px-3 py-[7px] text-content text-[13px] font-sans outline-none focus:border-content"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => enhance("phrases", phrasePrompt)}
+                    disabled={!phrasePrompt.trim() || enhancing.phrases}
+                    className="shrink-0 bg-content text-white border-0 rounded-[7px] px-3 py-[7px] text-[12px] font-medium cursor-pointer font-sans disabled:opacity-30 disabled:cursor-default"
+                  >
+                    Generate
+                  </button>
+                </div>
+              )}
               <textarea
                 value={v[key]}
                 onChange={(e) => update(key, e.target.value)}
                 rows={2}
-                className="w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content"
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = "auto";
+                    el.style.height = el.scrollHeight + "px";
+                  }
+                }}
+                onInput={(e) => {
+                  const t = e.currentTarget;
+                  t.style.height = "auto";
+                  t.style.height = t.scrollHeight + "px";
+                }}
+                className="w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content overflow-hidden"
               />
               {i < arr.length - 1 && <Divider className="mt-[22px]" />}
             </div>
@@ -374,41 +456,47 @@ export function VoiceView() {
         </p>
 
         {/* Drop zone */}
-        <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            handleFiles(e.dataTransfer.files);
-          }}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-[1.5px] border-dashed rounded-lg py-7 px-5 text-center cursor-pointer transition-all duration-150 ${
-            dragging
-              ? "border-content bg-surface"
-              : "border-border bg-transparent"
-          } ${files.length ? "mb-4" : ""}`}
-        >
-          <div className="text-xl mb-2 opacity-30">{"\u2191"}</div>
-          <div className="text-[13px] text-content-sub mb-1">
-            Drop files here or{" "}
-            <span className="text-content font-medium">browse</span>
+        {files.length < MAX_DOCUMENTS ? (
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              handleFiles(e.dataTransfer.files);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-[1.5px] border-dashed rounded-lg py-7 px-5 text-center cursor-pointer transition-all duration-150 ${
+              dragging
+                ? "border-content bg-surface"
+                : "border-border bg-transparent"
+            } ${files.length ? "mb-4" : ""}`}
+          >
+            <div className="text-xl mb-2 opacity-30">{"\u2191"}</div>
+            <div className="text-[13px] text-content-sub mb-1">
+              Drop files here or{" "}
+              <span className="text-content font-medium">browse</span>
+            </div>
+            <div className="text-[11px] text-content-faint">
+              PDF or TXT · Max {MAX_DOCUMENTS} files
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.txt"
+              multiple
+              className="hidden"
+              onChange={(e) => e.target.files && handleFiles(e.target.files)}
+            />
           </div>
-          <div className="text-[11px] text-content-faint">
-            PDF or TXT · Max 10 MB each
+        ) : (
+          <div className="text-[11px] text-content-faint mb-4">
+            Maximum of {MAX_DOCUMENTS} documents reached. Remove one to upload another.
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.txt"
-            multiple
-            className="hidden"
-            onChange={(e) => e.target.files && handleFiles(e.target.files)}
-          />
-        </div>
+        )}
 
         {/* File list */}
         {files.length > 0 && (

@@ -3,12 +3,21 @@ import { createServerClient } from "@/lib/supabase-server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const supabase = createServerClient();
-  const { data, error } = await supabase
+  const { searchParams } = new URL(req.url);
+  const voiceSettingsId = searchParams.get("voice_settings_id");
+
+  let query = supabase
     .from("voice_examples")
     .select("*")
     .order("created_at", { ascending: false });
+
+  if (voiceSettingsId) {
+    query = query.eq("voice_settings_id", voiceSettingsId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -19,7 +28,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const supabase = createServerClient();
   const body = await req.json();
-  const { platform, comment_text, reply_text } = body;
+  const { platform, comment_text, reply_text, voice_settings_id } = body;
 
   const { data, error } = await supabase
     .from("voice_examples")
@@ -28,6 +37,7 @@ export async function POST(req: NextRequest) {
       comment_text,
       reply_text,
       source: "manual",
+      ...(voice_settings_id ? { voice_settings_id } : {}),
     })
     .select()
     .single();

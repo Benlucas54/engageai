@@ -1,11 +1,5 @@
-import { PageHeader } from "@/components/dashboard/PageHeader";
-import { VoiceView } from "@/components/dashboard/VoiceView";
+import { redirect } from "next/navigation";
 
 export default function VoicePage() {
-  return (
-    <>
-      <PageHeader title="Voice" />
-      <VoiceView />
-    </>
-  );
+  redirect("/settings");
 }

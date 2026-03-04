@@ -4,16 +4,20 @@ import { useState, useEffect, useCallback } from "react";
 import { getSupabase } from "@/lib/supabase";
 import type { VoiceDocument } from "@/lib/types";
 
-export function useVoiceDocuments() {
+export function useVoiceDocuments(voiceSettingsId?: string) {
   const [files, setFiles] = useState<VoiceDocument[]>([]);
 
   const fetchFiles = useCallback(async () => {
-    const res = await fetch("/api/voice-documents");
+    if (!voiceSettingsId) {
+      setFiles([]);
+      return;
+    }
+    const res = await fetch(`/api/voice-documents?voice_settings_id=${voiceSettingsId}`);
     if (res.ok) {
       const data = await res.json();
       if (data) setFiles(data as VoiceDocument[]);
     }
-  }, []);
+  }, [voiceSettingsId]);
 
   useEffect(() => {
     fetchFiles();
@@ -33,10 +37,11 @@ export function useVoiceDocuments() {
         file_size: file.size,
         file_type: file.name.endsWith(".pdf") ? "pdf" : "txt",
         storage_path: path,
+        voice_settings_id: voiceSettingsId,
       }),
     });
     fetchFiles();
-  }, [fetchFiles]);
+  }, [fetchFiles, voiceSettingsId]);
 
   const remove = useCallback(async (doc: VoiceDocument) => {
     await fetch("/api/voice-documents", {

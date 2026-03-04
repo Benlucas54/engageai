@@ -5,6 +5,7 @@ import type { Comment, CommenterProfile } from "@/lib/types";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
+import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
 import { getSupabase } from "@/lib/supabase";
@@ -116,6 +117,9 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
             )}
           </button>
           {!compact && <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>}
+          {!compact && c.smart_tag && (
+            <SmartTagBadge tagKey={c.smart_tag} />
+          )}
           {!compact && (
             <span className="text-[11px] text-content-xfaint">
               on &quot;{c.post_title}&quot;
@@ -176,26 +180,30 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
           </p>
         </div>
       )}
-      {reply && (
+      {/* Replied comments that were engaged externally (no reply sent through EngageAI) */}
+      {c.status === "replied" && !isSent && (
+        <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
+          <MiniLabel>Engaged externally</MiniLabel>
+          <p className="mt-1.5 mb-0 text-[12px] text-content-faint italic leading-[1.65]">
+            Liked
+          </p>
+        </div>
+      )}
+      {/* Inbox comments: show the EngageAI draft reply for editing */}
+      {reply && c.status !== "replied" && !isSent && (
         <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
           <div className="flex justify-between items-center">
-            <MiniLabel>{isOwnerReply ? "Your reply" : "EngageAI reply"}</MiniLabel>
+            <MiniLabel>EngageAI reply</MiniLabel>
             {saving && (
               <span className="text-[10px] text-content-faint">Saving...</span>
             )}
           </div>
-          {isSent ? (
-            <p className="mt-1.5 mb-0 text-[13px] text-content-sub leading-[1.65]">
-              {reply}
-            </p>
-          ) : (
-            <textarea
-              value={editText}
-              onChange={(e) => handleChange(e.target.value)}
-              className="mt-1.5 mb-0 w-full text-[13px] text-content-sub leading-[1.65] bg-transparent border-none outline-none resize-y font-sans p-0 min-h-[60px]"
-              rows={Math.max(2, editText.split("\n").length)}
-            />
-          )}
+          <textarea
+            value={editText}
+            onChange={(e) => handleChange(e.target.value)}
+            className="mt-1.5 mb-0 w-full text-[13px] text-content-sub leading-[1.65] bg-transparent border-none outline-none resize-y font-sans p-0 min-h-[60px]"
+            rows={Math.max(2, editText.split("\n").length)}
+          />
           {sendStep && sendStep !== "done" && STEP_LABELS[sendStep] && (
             <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${STEP_LABELS[sendStep].color}`}>
               {sendStep !== "error" && (
@@ -205,6 +213,15 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
               {STEP_LABELS[sendStep].label}
             </div>
           )}
+        </div>
+      )}
+      {/* Sent replies: show the actual reply that was posted */}
+      {reply && isSent && (
+        <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
+          <MiniLabel>Your reply</MiniLabel>
+          <p className="mt-1.5 mb-0 text-[13px] text-content-sub leading-[1.65]">
+            {reply}
+          </p>
         </div>
       )}
     </Card>

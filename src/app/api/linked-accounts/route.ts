@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const db = createServerClient();
-  const { data, error } = await db
-    .from("linked_accounts")
-    .select("*")
-    .order("platform");
+  const profileId = req.nextUrl.searchParams.get("profile_id");
+
+  let query = db.from("linked_accounts").select("*").order("platform");
+
+  if (profileId) {
+    query = query.eq("profile_id", profileId);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

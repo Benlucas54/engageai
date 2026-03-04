@@ -1,4 +1,4 @@
-import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
+import type { ScrapedComment, ScrapedFollower, EngagedComment, CommentMark, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 
 function parseRelativeTime(text: string): string {
   const match = text.match(/(\d+)\s*(s|m|h|d|w|mo|y)/i);
@@ -30,6 +30,10 @@ function isPostPage(): boolean {
 
 function isActivityPage(): boolean {
   return /threads\.(net|com)\/(activity|@[\w.]+\/replies)/.test(window.location.href);
+}
+
+function isRepliesTab(): boolean {
+  return /threads\.(net|com)\/activity\/replies/.test(window.location.href);
 }
 
 interface ParsedContainer {
@@ -174,13 +178,20 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
     if (!card || seen.has(card)) continue;
     seen.add(card);
 
-    // Skip notifications that are NOT comments (likes, follows, mentions without text)
-    const fullText = card.textContent?.toLowerCase() || "";
-    if (/followed you/i.test(fullText) && !/replied/i.test(fullText) && !/commented/i.test(fullText)) continue;
-    // "liked your" notifications are not comments — skip them
-    if (/liked your/i.test(fullText) && !/replied/i.test(fullText) && !/commented/i.test(fullText)) continue;
+    // On the replies tab, every card is a reply — skip the notification text check.
+    // On the general activity page, only accept reply/comment notifications.
+    if (!isRepliesTab()) {
+      const fullText = card.textContent?.toLowerCase() || "";
+      const isReplyNotification =
+        /replied to your/i.test(fullText) ||
+        /commented on your/i.test(fullText) ||
+        /replied to a thread/i.test(fullText);
+      if (!isReplyNotification) {
+        continue;
+      }
+    }
 
-    // Collect meaningful text spans
+    // Collect meaningful text spans (the actual comment text)
     const spans = card.querySelectorAll('span[dir="auto"], span[dir="ltr"]');
     const texts: string[] = [];
     for (const s of spans) {
@@ -194,7 +205,9 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
         t !== ownerUsername &&
         t !== `@${ownerUsername}` &&
         !/^\d+[smhd]?$/.test(t) &&
+        !/^[\d,.]+[KkMm]?$/.test(t) &&
         t.length > 3 &&
+        !/^(like|reply|repost|share|send)$/i.test(t) &&
         !/^replied to/i.test(t) &&
         !/^liked your/i.test(t) &&
         !/^mentioned you/i.test(t) &&
@@ -465,6 +478,7 @@ async function postReply(
       }
       if (!replyArea) continue;
     }
+    if (!replyArea) continue;
 
     replyArea.click();
     replyArea.focus();
@@ -568,6 +582,369 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// --- Comment indicators ---
+
+const MARKER_CLASS = "engageai-marker";
+
+function clearMarkers(): void {
+  document.querySelectorAll(`.${MARKER_CLASS}`).forEach((el) => el.remove());
+}
+
+function injectMarkers(marks: CommentMark[]): void {
+  clearMarkers();
+  const containers = document.querySelectorAll('div[data-pressable-container="true"]');
+  for (const mark of marks) {
+    for (const el of containers) {
+      const text = el.textContent || "";
+      if (text.includes(mark.username) && text.includes(mark.comment_text_prefix)) {
+        // Find username span (first span[dir="auto"] in container)
+        const spans = el.querySelectorAll('span[dir="auto"]');
+        const usernameSpan = spans[0];
+        if (usernameSpan) {
+          const dot = document.createElement("span");
+          dot.className = MARKER_CLASS;
+          const isPending = mark.status === "pending";
+          Object.assign(dot.style, {
+            display: "inline-block",
+            width: "8px",
+            height: "8px",
+            borderRadius: "50%",
+            backgroundColor: isPending ? "#3a6e8c" : "#92600a",
+            boxShadow: `0 0 0 2px ${isPending ? "#c5dff0" : "#f0ddb8"}`,
+            marginLeft: "6px",
+            position: "relative",
+            zIndex: "9999",
+            pointerEvents: "none",
+          });
+          dot.title = isPending ? "EngageAI: Pending review" : "EngageAI: Needs attention";
+          usernameSpan.parentElement?.insertBefore(dot, usernameSpan.nextSibling);
+        }
+        break;
+      }
+    }
+  }
+}
+
+// --- Follow notification scraping ---
+
+function scrapeFollowNotifications(): ScrapedFollower[] {
+  // Works on threads.net/activity page
+  if (!isActivityPage()) return [];
+
+  const followers: ScrapedFollower[] = [];
+  const seen = new Set<string>();
+
+  const allLinks = document.querySelectorAll('a[href^="/@"]');
+  const profileLinks: Element[] = [];
+  for (const link of allLinks) {
+    const href = link.getAttribute("href") || "";
+    if (/^\/@[\w.]+\/?$/.test(href)) {
+      profileLinks.push(link);
+    }
+  }
+
+  for (const link of profileLinks) {
+    const href = link.getAttribute("href") || "";
+    const username = href.match(/@([\w.]+)/)?.[1] || "";
+    if (!username || seen.has(username)) continue;
+
+    // Walk up to find the notification container
+    let el: Element | null = link;
+    let card: Element | null = null;
+    for (let i = 0; i < 15; i++) {
+      el = el?.parentElement || null;
+      if (!el) break;
+      const role = el.getAttribute("role");
+      const dp = el.getAttribute("data-pressable-container");
+      if (role === "listitem" || role === "article" || role === "row" || dp === "true") {
+        card = el;
+      }
+    }
+    if (!card) card = el;
+    if (!card) continue;
+
+    // Check if this is a follow notification
+    const fullText = (card.textContent || "").toLowerCase();
+    if (!fullText.includes("followed you") && !fullText.includes("started following")) continue;
+
+    seen.add(username);
+    const displaySpan = link.querySelector("span");
+    const displayName = displaySpan?.textContent?.trim();
+
+    followers.push({
+      platform: "threads",
+      username,
+      display_name: displayName && displayName !== username ? displayName : undefined,
+    });
+  }
+
+  return followers;
+}
+
+async function scrapeFollowerProfile(username: string): Promise<{
+  bio: string | null;
+  follower_count: number | null;
+  following_count: number | null;
+  post_count: number | null;
+  has_recent_posts: boolean | null;
+  display_name: string | null;
+  profile_pic_url: string | null;
+}> {
+  try {
+    const res = await fetch(`https://www.threads.net/@${username}`, { credentials: "include" });
+    const html = await res.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    const metaDesc = doc.querySelector('meta[name="description"]')?.getAttribute("content") || "";
+    const title = doc.querySelector("title")?.textContent || "";
+
+    // Parse follower counts from meta description
+    const countsMatch = metaDesc.match(/([\d,.]+[KkMm]?)\s*Followers/i);
+    const follower_count = countsMatch ? parseCount(countsMatch[1]) : null;
+
+    // Try to extract bio
+    const bio = metaDesc.length > 0 ? metaDesc.split(".").slice(1).join(".").trim() || null : null;
+
+    const nameMatch = title.match(/^(.+?)\s*\(/);
+    const display_name = nameMatch ? nameMatch[1].trim() : null;
+
+    const profile_pic_url = doc.querySelector('meta[property="og:image"]')?.getAttribute("content") || null;
+
+    return {
+      bio,
+      follower_count,
+      following_count: null,
+      post_count: null,
+      has_recent_posts: null,
+      display_name,
+      profile_pic_url,
+    };
+  } catch {
+    return {
+      bio: null,
+      follower_count: null,
+      following_count: null,
+      post_count: null,
+      has_recent_posts: null,
+      display_name: null,
+      profile_pic_url: null,
+    };
+  }
+}
+
+function parseCount(str: string): number {
+  const cleaned = str.replace(/,/g, "").trim();
+  const num = parseFloat(cleaned);
+  if (cleaned.toLowerCase().endsWith("k")) return Math.round(num * 1000);
+  if (cleaned.toLowerCase().endsWith("m")) return Math.round(num * 1000000);
+  return Math.round(num);
+}
+
+// --- DM sending ---
+
+async function sendDM(
+  username: string,
+  messageText: string
+): Promise<ContentScriptResponse> {
+  await setStatus("opening_dm", username);
+
+  window.location.href = "https://www.threads.net/direct/";
+  await delay(3000);
+
+  // Click new message / compose button
+  const newMsgBtn = Array.from(document.querySelectorAll('div[role="button"], button')).find(
+    (b) => /new message|compose/i.test(b.textContent?.trim() || "") || b.getAttribute("aria-label")?.toLowerCase().includes("new message")
+  ) as HTMLElement | null;
+  if (newMsgBtn) {
+    newMsgBtn.click();
+    await delay(2000);
+  }
+
+  // Search for user
+  await setStatus("searching", username);
+  const searchInput = document.querySelector(
+    'input[placeholder*="Search" i], input[type="text"]'
+  ) as HTMLInputElement | null;
+
+  if (!searchInput) {
+    await setStatus("error", username);
+    return { success: false, error: "DM search input not found" };
+  }
+
+  searchInput.focus();
+  await delay(500);
+
+  for (const char of username) {
+    document.execCommand("insertText", false, char);
+    searchInput.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    await delay(80 + Math.random() * 60);
+  }
+  await delay(2000);
+
+  // Click matching user result
+  await setStatus("selecting", username);
+  const results = document.querySelectorAll('div[role="option"], div[role="listbox"] div, button');
+  let found = false;
+  for (const result of results) {
+    if ((result.textContent || "").toLowerCase().includes(username.toLowerCase())) {
+      (result as HTMLElement).click();
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    await setStatus("error", username);
+    return { success: false, error: "User not found in DM search" };
+  }
+  await delay(1500);
+
+  // Click Chat/Next
+  const chatBtn = Array.from(document.querySelectorAll('div[role="button"], button')).find(
+    (b) => /^(chat|next)$/i.test(b.textContent?.trim() || "")
+  ) as HTMLElement | null;
+  if (chatBtn) {
+    chatBtn.click();
+    await delay(2000);
+  }
+
+  // Type message
+  await setStatus("typing", username);
+  const msgInput = document.querySelector(
+    'div[contenteditable="true"][role="textbox"], div[contenteditable="true"], textarea'
+  ) as HTMLElement | null;
+
+  if (!msgInput) {
+    await setStatus("error", username);
+    return { success: false, error: "Message input not found" };
+  }
+
+  msgInput.focus();
+  await delay(300);
+
+  for (const char of messageText) {
+    document.execCommand("insertText", false, char);
+    msgInput.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
+    await delay(80 + Math.random() * 120);
+  }
+
+  await delay(500);
+
+  // Send
+  await setStatus("sending", username);
+  const sendBtn = Array.from(document.querySelectorAll('div[role="button"], button')).find(
+    (b) => b.textContent?.trim().toLowerCase() === "send"
+  ) as HTMLElement | null;
+  if (sendBtn) {
+    sendBtn.click();
+  } else {
+    msgInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  }
+
+  await delay(2000);
+  await setStatus("done", username);
+  return { success: true };
+}
+
+// --- Comment on post ---
+
+async function commentOnPost(
+  username: string,
+  messageText: string,
+  postUrl?: string
+): Promise<ContentScriptResponse> {
+  await setStatus("navigating", username);
+
+  if (postUrl) {
+    window.location.href = postUrl;
+  } else {
+    window.location.href = `https://www.threads.net/@${username}`;
+    await delay(3000);
+
+    // Find and click the first post/thread
+    const threadLink = document.querySelector('a[href*="/post/"]') as HTMLAnchorElement | null;
+    if (!threadLink) {
+      await setStatus("error", username);
+      return { success: false, error: "No posts found on profile" };
+    }
+    threadLink.click();
+  }
+
+  await delay(3000);
+
+  // Click reply icon on the post
+  await setStatus("opening_reply", username);
+  const svgs = document.querySelectorAll("svg");
+  for (const svg of svgs) {
+    const label = (svg.getAttribute("aria-label") || "").toLowerCase();
+    if (label === "reply" || label === "comment") {
+      const btn = svg.closest('div[role="button"], button') as HTMLElement | null;
+      if (btn) {
+        btn.click();
+        break;
+      }
+    }
+  }
+
+  await delay(2500);
+
+  // Find reply area in modal
+  const modal = document.querySelector('div[role="dialog"]');
+  const replyArea = (modal || document).querySelector(
+    'div[contenteditable="true"], p[contenteditable="true"], div[role="textbox"]'
+  ) as HTMLElement | null;
+
+  if (!replyArea) {
+    await setStatus("error", username);
+    return { success: false, error: "Reply area not found" };
+  }
+
+  // Type comment
+  await setStatus("typing", username);
+  replyArea.click();
+  replyArea.focus();
+  await delay(500);
+
+  for (const char of messageText) {
+    document.execCommand("insertText", false, char);
+    replyArea.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
+    await delay(80 + Math.random() * 60);
+  }
+
+  await delay(500);
+
+  // Click Post
+  await setStatus("posting", username);
+  const searchRoot = modal || document;
+  const buttons = searchRoot.querySelectorAll('div[role="button"], button');
+  let clicked = false;
+  for (const btn of buttons) {
+    if (btn.textContent?.trim().toLowerCase() === "post") {
+      (btn as HTMLElement).click();
+      clicked = true;
+      break;
+    }
+  }
+  if (!clicked) {
+    await setStatus("error", username);
+    return { success: false, error: "Post button not found" };
+  }
+
+  await delay(3000);
+
+  await setStatus("done", username);
+  return { success: true };
+}
+
+// Clear markers on SPA navigation
+let _lastUrl = location.href;
+new MutationObserver(() => {
+  if (location.href !== _lastUrl) {
+    _lastUrl = location.href;
+    clearMarkers();
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
 chrome.runtime.onMessage.addListener(
   (
     message: ContentScriptMessage,
@@ -583,6 +960,50 @@ chrome.runtime.onMessage.addListener(
 
     if (message.action === "POST_REPLY") {
       postReply(message.payload).then(sendResponse);
+      return true;
+    }
+
+    if (message.action === "MARK_COMMENTS") {
+      injectMarkers(message.marks || []);
+      sendResponse({ success: true });
+    }
+
+    if (message.action === "CLEAR_MARKS") {
+      clearMarkers();
+      sendResponse({ success: true });
+    }
+
+    if (message.action === "SCRAPE_NOTIFICATIONS") {
+      const followers = scrapeFollowNotifications();
+      sendResponse({ success: true, followers });
+    }
+
+    if (message.action === "SCRAPE_FOLLOWER_PROFILE") {
+      if (!message.username) {
+        sendResponse({ success: false, error: "No username" });
+        return;
+      }
+      scrapeFollowerProfile(message.username).then((profile) => {
+        sendResponse({ success: true, ...profile });
+      });
+      return true;
+    }
+
+    if (message.action === "SEND_DM") {
+      if (!message.username || !message.messageText) {
+        sendResponse({ success: false, error: "Missing username or messageText" });
+        return;
+      }
+      sendDM(message.username, message.messageText).then(sendResponse);
+      return true;
+    }
+
+    if (message.action === "COMMENT_ON_POST") {
+      if (!message.username || !message.messageText) {
+        sendResponse({ success: false, error: "Missing username or messageText" });
+        return;
+      }
+      commentOnPost(message.username, message.messageText, message.postUrl).then(sendResponse);
       return true;
     }
   }

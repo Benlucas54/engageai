@@ -1,11 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { supabase } from "./supabase";
 import type { ScrapedComment, Platform, CommenterProfile } from "./types";
 
-const anthropic = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+const API_URL = import.meta.env.VITE_API_URL;
 
 /**
  * Upsert profile counters for each unique commenter in the batch.
@@ -75,7 +71,7 @@ export async function getCommenterProfile(
 
 /**
  * Update profile summaries using AI. Runs asynchronously after the main reply loop.
- * Skips profiles analyzed within the last 30 minutes.
+ * Calls the server-side API route to avoid exposing the Anthropic key.
  */
 export async function updateProfileSummaries(
   comments: ScrapedComment[]
@@ -89,79 +85,20 @@ export async function updateProfileSummaries(
     }
   }
 
-  const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const res = await fetch(`${API_URL}/api/summarize-profiles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commenters: Array.from(commenters.values()) }),
+  });
 
-  for (const { platform, username } of commenters.values()) {
-    // Fetch existing profile
-    const { data: profile } = await supabase
-      .from("commenter_profiles")
-      .select("*")
-      .eq("platform", platform)
-      .eq("username", username)
-      .limit(1)
-      .single();
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    console.error("[EngageAI] Profile summary update failed:", err.error);
+    return;
+  }
 
-    if (!profile) continue;
-
-    // Skip if analyzed recently
-    if (profile.last_analyzed_at && profile.last_analyzed_at > thirtyMinAgo) {
-      continue;
-    }
-
-    // Fetch last 20 comments from this commenter
-    const { data: recentComments } = await supabase
-      .from("comments")
-      .select("comment_text, post_title, created_at")
-      .eq("platform", platform)
-      .eq("username", username)
-      .order("created_at", { ascending: false })
-      .limit(20);
-
-    if (!recentComments?.length) continue;
-
-    const commentHistory = recentComments
-      .map(
-        (c: { comment_text: string; post_title: string; created_at: string }) =>
-          `[${c.post_title || "unknown post"}] "${c.comment_text}"`
-      )
-      .join("\n");
-
-    const existingSummary = profile.summary
-      ? `Existing summary: ${profile.summary}\n\n`
-      : "";
-
-    try {
-      const response = await anthropic.messages.create({
-        model: "claude-haiku-4-5",
-        max_tokens: 200,
-        messages: [
-          {
-            role: "user",
-            content: `${existingSummary}Here are the last ${recentComments.length} comments from @${username} on ${platform}:\n\n${commentHistory}\n\nSummarize this person in 1-2 sentences (max 200 chars). Note their interests, tone, and recurring themes. Also extract 3-5 short topic tags.\n\nRespond with JSON only: { "summary": "...", "topics": ["..."] }`,
-          },
-        ],
-      });
-
-      const block = response.content[0];
-      if (block.type !== "text") continue;
-
-      const parsed = JSON.parse(block.text);
-
-      await supabase
-        .from("commenter_profiles")
-        .update({
-          summary: parsed.summary || "",
-          topics: parsed.topics || [],
-          last_analyzed_at: new Date().toISOString(),
-        })
-        .eq("id", profile.id);
-
-      console.log(`[EngageAI] Updated profile summary for @${username}`);
-    } catch (err) {
-      console.error(
-        `[EngageAI] Failed to summarize profile for @${username}:`,
-        err
-      );
-    }
+  const { updated } = await res.json();
+  if (updated > 0) {
+    console.log(`[EngageAI] Updated ${updated} profile summaries`);
   }
 }

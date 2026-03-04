@@ -5,6 +5,7 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   auto_threshold: "simple",
   active_platforms: ["instagram", "threads"],
   jitter_minutes: 15,
+  scan_interval_minutes: 5,
 };
 
 export async function getQueue(): Promise<QueuedReply[]> {

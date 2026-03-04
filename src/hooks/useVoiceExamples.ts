@@ -3,16 +3,20 @@
 import { useState, useEffect, useCallback } from "react";
 import type { VoiceExample } from "@/lib/types";
 
-export function useVoiceExamples() {
+export function useVoiceExamples(voiceSettingsId?: string) {
   const [examples, setExamples] = useState<VoiceExample[]>([]);
 
   const fetchExamples = useCallback(async () => {
-    const res = await fetch("/api/voice-examples");
+    if (!voiceSettingsId) {
+      setExamples([]);
+      return;
+    }
+    const res = await fetch(`/api/voice-examples?voice_settings_id=${voiceSettingsId}`);
     if (res.ok) {
       const data = await res.json();
       setExamples((data as VoiceExample[]) || []);
     }
-  }, []);
+  }, [voiceSettingsId]);
 
   useEffect(() => {
     fetchExamples();
@@ -23,11 +27,16 @@ export function useVoiceExamples() {
       await fetch("/api/voice-examples", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform, comment_text, reply_text }),
+        body: JSON.stringify({
+          platform,
+          comment_text,
+          reply_text,
+          voice_settings_id: voiceSettingsId,
+        }),
       });
       fetchExamples();
     },
-    [fetchExamples]
+    [fetchExamples, voiceSettingsId]
   );
 
   const removeExample = useCallback(

@@ -4,8 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { NAV_ITEMS } from "@/lib/constants";
 import { useComments } from "@/hooks/useComments";
-import { useAgentStatus } from "@/hooks/useAgentStatus";
-import { timeAgo } from "@/utils/timeAgo";
+import { useFollowers } from "@/hooks/useFollowers";
 import { useState, useEffect } from "react";
 import { getSupabase } from "@/lib/supabase";
 
@@ -22,36 +21,23 @@ export function Sidebar() {
       );
   }, []);
   const { comments } = useComments();
-  const agentRun = useAgentStatus();
+  const { followers } = useFollowers();
 
-  const flagCount = comments.filter((c) => {
+  const commentFlagCount = comments.filter((c) => {
     if (c.status !== "flagged" && c.status !== "pending") return false;
     if (c.replies?.some((r) => r.sent_at)) return false;
     if (c.replies?.some((r) => r.approved)) return false;
     return true;
   }).length;
 
-  const statusColor = agentRun
-    ? agentRun.status === "success"
-      ? "bg-[#7ab87a]"
-      : agentRun.status === "running"
-        ? "bg-[#d4a843]"
-        : "bg-[#b87a7a]"
-    : "bg-content-xfaint";
+  const followerFlagCount = followers.filter((f) => {
+    if (f.status !== "new") return false;
+    const actions = f.follower_actions || [];
+    if (actions.length === 0) return true;
+    return actions.some((a) => !a.sent_at && !a.approved);
+  }).length;
 
-  const statusLabel = agentRun
-    ? agentRun.status === "running"
-      ? "Agent running"
-      : agentRun.status === "success"
-        ? "Agent active"
-        : "Agent error"
-    : "Agent idle";
-
-  const lastRunText = agentRun?.completed_at
-    ? `Last run ${timeAgo(agentRun.completed_at)}`
-    : agentRun?.status === "running"
-      ? "Running now..."
-      : "No runs yet";
+  const flagCount = commentFlagCount + followerFlagCount;
 
   return (
     <div className="w-[220px] bg-surface-sidebar border-r border-border flex flex-col sticky top-0 h-screen shrink-0">
@@ -92,19 +78,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Agent status */}
-      <div className="px-6 py-5 border-t border-border-light">
-        <div className="flex items-center gap-[7px] mb-[5px]">
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusColor}`} />
-          <span className="text-[11px] text-content-faint">{statusLabel}</span>
-        </div>
-        <div className="text-[11px] text-content-xfaint leading-[1.8]">
-          {lastRunText}
-          <br />
-          Instagram · Threads · X
-        </div>
-      </div>
 
       {/* Profile / Sign out */}
       <div className="px-3 pb-4 group relative">

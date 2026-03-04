@@ -5,20 +5,23 @@ import type { LinkedAccount } from "@/lib/types";
 
 const PLATFORMS = ["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const;
 
-export function useLinkedAccounts() {
+export function useLinkedAccounts(profileId?: string) {
   const [accounts, setAccounts] = useState<LinkedAccount[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetch = useCallback(async () => {
-    const res = await globalThis.fetch("/api/linked-accounts");
+  const fetchAccounts = useCallback(async () => {
+    const url = profileId
+      ? `/api/linked-accounts?profile_id=${profileId}`
+      : "/api/linked-accounts";
+    const res = await globalThis.fetch(url);
     const data = res.ok ? await res.json() : [];
     setAccounts((data as LinkedAccount[]) || []);
     setLoading(false);
-  }, []);
+  }, [profileId]);
 
   useEffect(() => {
-    fetch();
-  }, [fetch]);
+    fetchAccounts();
+  }, [fetchAccounts]);
 
   const save = useCallback(async (account: LinkedAccount) => {
     await globalThis.fetch("/api/linked-accounts", {
@@ -32,8 +35,14 @@ export function useLinkedAccounts() {
     });
   }, []);
 
-  const initializeDefaults = useCallback(async () => {
-    const rows = PLATFORMS.map((p) => ({ platform: p, username: "", enabled: false }));
+  const initializeDefaults = useCallback(async (forProfileId?: string) => {
+    const pid = forProfileId || profileId;
+    const rows = PLATFORMS.map((p) => ({
+      platform: p,
+      username: "",
+      enabled: false,
+      ...(pid ? { profile_id: pid } : {}),
+    }));
     const res = await globalThis.fetch("/api/linked-accounts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -43,7 +52,7 @@ export function useLinkedAccounts() {
       const data = await res.json();
       setAccounts(data as LinkedAccount[]);
     }
-  }, []);
+  }, [profileId]);
 
-  return { accounts, loading, save, initializeDefaults, refetch: fetch };
+  return { accounts, loading, save, initializeDefaults, refetch: fetchAccounts };
 }

@@ -678,7 +678,13 @@ export default function V2LandingPage() {
           <WaitlistForm />
           <p className="text-[11px] text-content-xfaint mt-3">Free during early access</p>
         </div>
-        <p className="text-[11px] text-content-xfaint mt-16">
+        <div className="flex justify-center gap-4 flex-wrap mt-16">
+          <a href="/privacy" className="text-[11px] text-content-faint hover:text-content transition-colors">Privacy</a>
+          <a href="/terms" className="text-[11px] text-content-faint hover:text-content transition-colors">Terms</a>
+          <a href="/cookies" className="text-[11px] text-content-faint hover:text-content transition-colors">Cookies</a>
+          <a href="/acceptable-use" className="text-[11px] text-content-faint hover:text-content transition-colors">Acceptable Use</a>
+        </div>
+        <p className="text-[11px] text-content-xfaint mt-3">
           &copy; {new Date().getFullYear()} Promptpreneur
         </p>
       </section>
