@@ -142,6 +142,10 @@ export interface SidePanelItem {
   username: string;
   commentText: string;
   smartTag: string | null;
+  smartTagLabel: string | null;
+  smartTagBg: string | null;
+  smartTagText: string | null;
+  smartTagBorder: string | null;
   draftText: string | null;
   platform: Platform;
   postUrl: string;

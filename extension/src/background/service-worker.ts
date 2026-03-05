@@ -289,17 +289,35 @@ async function sendSidePanelUpdate(tabId: number, platform: Platform): Promise<v
 
     if (!comments?.length) return;
 
-    const items: SidePanelItem[] = comments.map((c: any) => ({
-      commentId: c.id,
-      commentExternalId: c.comment_external_id,
-      username: c.username,
-      commentText: c.comment_text,
-      smartTag: c.smart_tag,
-      draftText: c.replies?.[0]?.draft_text || null,
-      platform: c.platform,
-      postUrl: c.post_url,
-      status: c.status as "pending" | "flagged",
-    }));
+    // Fetch smart tag definitions for label + color lookup
+    const { data: tagDefs } = await supabase
+      .from("smart_tags")
+      .select("key, label, color_bg, color_text, color_border")
+      .eq("enabled", true);
+
+    const tagMap = new Map<string, { label: string; color_bg: string; color_text: string; color_border: string }>();
+    for (const t of tagDefs || []) {
+      tagMap.set(t.key, t);
+    }
+
+    const items: SidePanelItem[] = comments.map((c: any) => {
+      const tagDef = c.smart_tag ? tagMap.get(c.smart_tag) : undefined;
+      return {
+        commentId: c.id,
+        commentExternalId: c.comment_external_id,
+        username: c.username,
+        commentText: c.comment_text,
+        smartTag: c.smart_tag,
+        smartTagLabel: tagDef?.label ?? null,
+        smartTagBg: tagDef?.color_bg ?? null,
+        smartTagText: tagDef?.color_text ?? null,
+        smartTagBorder: tagDef?.color_border ?? null,
+        draftText: c.replies?.[0]?.draft_text || null,
+        platform: c.platform,
+        postUrl: c.post_url,
+        status: c.status as "pending" | "flagged",
+      };
+    });
 
     chrome.tabs.sendMessage(tabId, {
       action: "UPDATE_SIDE_PANEL",

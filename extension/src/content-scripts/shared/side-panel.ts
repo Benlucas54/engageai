@@ -192,7 +192,7 @@ function renderExpandedPanel(container: HTMLElement): void {
     cardHeader.className = "card-header";
     cardHeader.innerHTML = `
       <span class="card-username">@${escapeHtml(item.username)}</span>
-      ${item.smartTag ? `<span class="card-tag">${escapeHtml(item.smartTag)}</span>` : ""}
+      ${item.smartTag ? `<span class="card-tag"${item.smartTagBg ? ` style="background:${item.smartTagBg};color:${item.smartTagText || '#3f3f46'};border:1px solid ${item.smartTagBorder || '#d4d4d8'}"` : ""}>${escapeHtml(item.smartTagLabel || item.smartTag)}</span>` : ""}
     `;
     card.appendChild(cardHeader);
 
@@ -452,8 +452,9 @@ function getPanelStyles(): string {
       font-size: 10px;
       padding: 1px 6px;
       border-radius: 9999px;
-      background: #f0f7fd;
-      color: #3a6e8c;
+      background: #f4f4f5;
+      color: #3f3f46;
+      border: 1px solid #d4d4d8;
       font-weight: 500;
     }
     .card-comment {
