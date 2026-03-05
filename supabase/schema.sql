@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS comments (
   post_title TEXT,
   post_url TEXT,
   comment_external_id TEXT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'replied', 'flagged', 'hidden')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'replied', 'flagged', 'hidden', 'dismissed')),
   smart_tag TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   synced_at TIMESTAMPTZ NOT NULL DEFAULT now()

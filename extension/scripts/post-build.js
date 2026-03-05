@@ -23,12 +23,27 @@ for (const size of ["16", "48", "128"]) {
 const popupSrc = path.join(dist, "src", "popup", "index.html");
 if (fs.existsSync(popupSrc)) {
   let html = fs.readFileSync(popupSrc, "utf-8");
-  // Replace any absolute or deep-relative paths to just ./
   html = html.replace(/src="[^"]*\/popup\.js"/g, 'src="./popup.js"');
   html = html.replace(/href="[^"]*\/chunks\//g, 'href="./chunks/');
   html = html.replace(/src="[^"]*\/chunks\//g, 'src="./chunks/');
   fs.writeFileSync(path.join(dist, "popup.html"), html);
-  fs.rmSync(path.join(dist, "src"), { recursive: true, force: true });
 }
 
-console.log("Post-build: manifest, icons, popup.html copied to dist/");
+// Move sidepanel HTML from nested path to root and fix paths
+const sidepanelSrc = path.join(dist, "src", "popup", "sidepanel.html");
+if (fs.existsSync(sidepanelSrc)) {
+  let spHtml = fs.readFileSync(sidepanelSrc, "utf-8");
+  spHtml = spHtml.replace(/src="[^"]*\/sidepanel\.js"/g, 'src="./sidepanel.js"');
+  spHtml = spHtml.replace(/src="[^"]*\/popup\.js"/g, 'src="./popup.js"');
+  spHtml = spHtml.replace(/href="[^"]*\/chunks\//g, 'href="./chunks/');
+  spHtml = spHtml.replace(/src="[^"]*\/chunks\//g, 'src="./chunks/');
+  fs.writeFileSync(path.join(dist, "sidepanel.html"), spHtml);
+}
+
+// Clean up nested src directory after extracting HTML files
+const srcDir = path.join(dist, "src");
+if (fs.existsSync(srcDir)) {
+  fs.rmSync(srcDir, { recursive: true, force: true });
+}
+
+console.log("Post-build: manifest, icons, popup.html, sidepanel.html copied to dist/");

@@ -16,23 +16,23 @@ const FEATURES = [
       "Every reply is generated in your brand voice — trained on your tone, phrases, and boundaries. No generic templates.",
   },
   {
-    label: "Smart Thresholds",
+    label: "Suggestion Modes",
     title: "Stay in control",
     description:
-      "Auto-handle the simple comments. Flag the complex ones for your review. You decide how much the agent handles.",
+      "Choose how many AI suggestions you get — from every comment to high-priority only. You decide what gets a reply.",
   },
   {
     label: "One Dashboard",
     title: "See everything in one place",
     description:
-      "Monitor comments across all your platforms, review AI drafts, and track your agent's activity in real time.",
+      "Review AI suggestions across all your platforms, send with one click, and track your response rate in real time.",
   },
 ];
 
 const STEPS = [
   { number: "1", title: "Link your accounts", description: "Connect Instagram, Threads, X, LinkedIn, and more." },
   { number: "2", title: "Configure your voice", description: "Set your tone, phrases, things to avoid, and sign-off style." },
-  { number: "3", title: "Let the agent work", description: "Sit back while on-brand replies flow automatically." },
+  { number: "3", title: "Review and send", description: "Review AI-drafted suggestions, edit if needed, then copy and send with one click." },
 ];
 
 const PLATFORMS = Object.entries(P_LABEL);
@@ -148,8 +148,8 @@ export default function LandingPage() {
           className="text-[15px] leading-relaxed text-content-sub max-w-[520px] mx-auto mt-5 animate-fade-up"
           style={{ animationDelay: "0.2s" }}
         >
-          EngageAI reads your comments, generates on-brand replies, and posts
-          them automatically — across every platform you care about.
+          EngageAI reads your comments, drafts on-brand replies for your review
+          — across every platform you care about.
         </p>
         <div
           className="mt-8 animate-fade-up"

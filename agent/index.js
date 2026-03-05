@@ -1,10 +1,7 @@
 import "dotenv/config";
 import { supabase } from "./supabaseAdmin.js";
 import { scrapeAll } from "./scraper.js";
-import { generateRepliesForBatch, getVoiceWithDocuments } from "./reply.js";
-import { startBot, notifyFlagged, notifySummary } from "./notifier.js";
-import { postReply as postInstagramReply } from "./platforms/instagram.js";
-import { postReply as postThreadsReply } from "./platforms/threads.js";
+import { generateRepliesForBatch, getVoiceWithDocuments, checkAgentAccess } from "./reply.js";
 
 const ONCE = process.argv.includes("--once");
 const MIN_INTERVAL = 55 * 60 * 1000; // 55 minutes
@@ -26,49 +23,8 @@ async function isConcurrentRunning() {
   return data && data.length > 0;
 }
 
-async function postApprovedReplies() {
-  // Find approved but unsent replies
-  const { data: replies } = await supabase
-    .from("replies")
-    .select("*, comments(*)")
-    .eq("approved", true)
-    .is("sent_at", null);
-
-  if (!replies || replies.length === 0) return 0;
-
-  let sentCount = 0;
-
-  for (const reply of replies) {
-    const comment = reply.comments;
-    if (!comment || !comment.post_url) continue;
-
-    let success = false;
-
-    try {
-      if (comment.platform === "instagram") {
-        success = await postInstagramReply(comment, reply.draft_text || reply.reply_text);
-      } else if (comment.platform === "threads") {
-        success = await postThreadsReply(comment, reply.draft_text || reply.reply_text);
-      } else if (comment.platform === "x") {
-        console.log(`Skipping X reply for comment ${comment.id} — posting disabled`);
-        continue;
-      }
-    } catch (err) {
-      console.error(`Error posting reply to ${comment.platform}:`, err.message);
-    }
-
-    if (success) {
-      await supabase.from("replies").update({ sent_at: new Date().toISOString() }).eq("id", reply.id);
-      await supabase.from("comments").update({ status: "replied" }).eq("id", comment.id);
-      sentCount++;
-    }
-  }
-
-  return sentCount;
-}
-
 async function runPipeline() {
-  console.log(`\n--- Agent run starting at ${new Date().toISOString()} ---`);
+  console.log(`\n--- Sync run starting at ${new Date().toISOString()} ---`);
 
   // Concurrent run guard
   if (await isConcurrentRunning()) {
@@ -86,63 +42,47 @@ async function runPipeline() {
   const runId = run?.id;
 
   try {
+    // 0. Check agent feature access
+    const access = await checkAgentAccess();
+    if (!access.allowed) {
+      console.log(`Agent skipped: ${access.reason}`);
+      if (runId) {
+        await supabase.from("agent_runs").update({
+          completed_at: new Date().toISOString(),
+          status: "skipped",
+          error_message: access.reason,
+        }).eq("id", runId);
+      }
+      return;
+    }
+
     // 1. Scrape all platforms
     const newComments = await scrapeAll();
     const pendingComments = newComments.filter(c => c.status === "pending");
-    const flaggedFromScrape = newComments.filter(c => c.status === "flagged");
     const hiddenCount = newComments.filter(c => c.status === "hidden").length;
 
-    // 2. Generate replies for pending comments
+    // 2. Generate draft suggestions for pending comments
     const { voice, docContext } = await getVoiceWithDocuments();
     let replyResults = [];
     if (pendingComments.length > 0 && voice) {
-      replyResults = await generateRepliesForBatch(pendingComments, voice, docContext);
+      replyResults = await generateRepliesForBatch(pendingComments, voice, docContext, access.subscription);
     }
 
-    // 3. Post approved auto-replies
-    const autoSent = await postApprovedReplies();
+    const suggestionsGenerated = replyResults.filter(r => r.status === "flagged" || r.status === "flagged-retry").length;
 
-    // 4. Send Telegram notifications for flagged comments
-    const allFlagged = [
-      ...flaggedFromScrape,
-      ...replyResults.filter(r => r.status === "flagged" || r.status === "flagged-retry"),
-    ];
-
-    for (const flagged of allFlagged) {
-      const { data: comment } = await supabase
-        .from("comments")
-        .select("*, replies(*)")
-        .eq("id", flagged.id)
-        .single();
-
-      if (comment) {
-        const draftReply = comment.replies?.[0]?.draft_text || comment.replies?.[0]?.reply_text || "";
-        await notifyFlagged(comment, draftReply);
-      }
-    }
-
-    // 5. Summary notification
-    const stats = {
-      commentsFound: newComments.length,
-      repliesSent: autoSent,
-      flaggedCount: allFlagged.length,
-      hiddenCount,
-    };
-    await notifySummary(stats);
-
-    // 6. Update agent run
+    // 3. Update agent run
     if (runId) {
       await supabase.from("agent_runs").update({
         completed_at: new Date().toISOString(),
         comments_found: newComments.length,
-        replies_sent: autoSent,
-        flagged_count: allFlagged.length,
+        replies_sent: 0,
+        flagged_count: suggestionsGenerated,
         platform: "all",
         status: "success",
       }).eq("id", runId);
     }
 
-    console.log(`--- Run complete: ${newComments.length} found, ${autoSent} sent, ${allFlagged.length} flagged ---`);
+    console.log(`--- Run complete: ${newComments.length} found, ${suggestionsGenerated} suggestions generated ---`);
   } catch (err) {
     console.error("Pipeline error:", err);
     if (runId) {
@@ -157,10 +97,7 @@ async function runPipeline() {
 
 // Entry point
 async function main() {
-  console.log("EngageAI Agent starting...");
-
-  // Start Telegram bot (runs in background)
-  startBot();
+  console.log("EngageAI Sync starting...");
 
   if (ONCE) {
     await runPipeline();

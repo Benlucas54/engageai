@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@/lib/supabase-server";
+import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -22,6 +23,15 @@ export async function POST(req: NextRequest) {
         { error: "Missing commenters array" },
         { status: 400 }
       );
+    }
+
+    // Usage gating
+    const userId = await getUserFromRequest(req);
+    if (userId) {
+      const gate = await withUsageGating(userId, "profile_summaries", commenters.length);
+      if (!gate.allowed) {
+        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
+      }
     }
 
     const supabase = createServerClient();

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useProfiles } from "@/hooks/useProfiles";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { OnboardingWizard } from "@/components/dashboard/OnboardingWizard";
+import { PaymentWarningBanner } from "@/components/dashboard/PaymentWarningBanner";
 import { LayoutProvider, useLayout } from "@/contexts/LayoutContext";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     <LayoutProvider>
       <div className="flex min-h-screen">
         <Sidebar />
-        <MainContent>{children}</MainContent>
+        <div className="flex-1 flex flex-col">
+          <PaymentWarningBanner />
+          <MainContent>{children}</MainContent>
+        </div>
       </div>
     </LayoutProvider>
   );
@@ -47,7 +51,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 function MainContent({ children }: { children: React.ReactNode }) {
   const { wide } = useLayout();
   return (
-    <main className="flex-1 overflow-y-auto">
+    <main className="flex-1 overflow-y-auto min-h-0">
       <div
         className={`mx-auto pt-12 pb-24 ${
           wide ? "max-w-full px-8" : "max-w-[760px] px-12"

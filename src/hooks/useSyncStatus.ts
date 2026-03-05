@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AgentRun } from "@/lib/types";
 
-export function useAgentStatus() {
+export function useSyncStatus() {
   const [run, setRun] = useState<AgentRun | null>(null);
 
   const fetchStatus = useCallback(async () => {

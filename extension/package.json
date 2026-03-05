@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && vite build --mode service-worker && node scripts/post-build.js"
+    "build": "vite build && vite build --mode content-instagram && vite build --mode content-threads && vite build --mode content-x && vite build --mode content-linkedin && vite build --mode content-tiktok && vite build --mode service-worker && node scripts/post-build.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

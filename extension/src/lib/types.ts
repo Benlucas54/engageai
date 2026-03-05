@@ -33,7 +33,7 @@ export interface Comment {
   post_title: string;
   post_url: string;
   comment_external_id: string;
-  status: "pending" | "replied" | "flagged" | "hidden";
+  status: "pending" | "replied" | "flagged" | "hidden" | "dismissed";
   smart_tag: SmartTag | null;
   created_at: string;
   synced_at: string;
@@ -70,24 +70,8 @@ export interface VoiceExample {
   created_at: string;
 }
 
-export interface QueuedReply {
-  comment_id: string;
-  comment_external_id: string;
-  reply_id: string;
-  reply_text: string;
-  platform: Platform;
-  post_url: string;
-  username: string;
-  comment_text: string;
-  scheduled_for: number;
-  status: "queued" | "sending" | "sent" | "failed";
-}
-
 export interface ExtensionSettings {
-  batch_times: string[];
-  auto_threshold: "none" | "simple" | "most" | "all";
   active_platforms: Platform[];
-  jitter_minutes: number;
   scan_interval_minutes: number;
 }
 
@@ -102,16 +86,32 @@ export interface CommentMark {
   username: string;
   comment_text_prefix: string;
   status: "pending" | "flagged";
+  draftText?: string;
+  postUrl?: string;
+  commentId?: string;
+}
+
+export interface EngagementContext {
+  postAuthor: string;
+  postCaption: string;
+  postUrl: string;
+  existingComments: { username: string; text: string }[];
+  platform: Platform;
+  replyInput: HTMLElement;
 }
 
 export interface ContentScriptMessage {
-  action: "SCRAPE" | "POST_REPLY" | "MARK_COMMENTS" | "CLEAR_MARKS" | "SCRAPE_NOTIFICATIONS" | "SCRAPE_FOLLOWER_PROFILE" | "SEND_DM" | "COMMENT_ON_POST";
-  payload?: QueuedReply;
+  action: "SCRAPE" | "MARK_COMMENTS" | "CLEAR_MARKS" | "SHOW_SUGGESTION" | "UPDATE_SIDE_PANEL" | "FILL_REPLY_INPUT";
   ownerUsername?: string;
   marks?: CommentMark[];
   username?: string;
-  messageText?: string;
   postUrl?: string;
+  commentExternalId?: string;
+  draftText?: string;
+  commentId?: string;
+  sidePanelItems?: SidePanelItem[];
+  fillText?: string;
+  platform?: Platform;
 }
 
 export interface EngagedComment {
@@ -129,24 +129,6 @@ export interface CommenterProfile {
   first_seen_at: string;
   last_seen_at: string;
   last_analyzed_at: string | null;
-}
-
-export interface AutomationRule {
-  id: string;
-  name: string;
-  keywords: string[];
-  match_mode: "any" | "all";
-  trigger_type: "keyword" | "tag" | "both";
-  trigger_tags: string[];
-  action_type: "fixed" | "ai_instruction";
-  fixed_template: string | null;
-  ai_instruction: string | null;
-  auto_send: boolean;
-  enabled: boolean;
-  priority: number;
-  platform: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ContentScriptResponse {
@@ -181,51 +163,14 @@ export interface Follower {
   status: "new" | "actioned" | "dismissed" | "unfollowed";
 }
 
-export interface FollowerActionRule {
-  id: string;
-  name: string;
-  platform: string | null;
-  message_type: "dm" | "comment";
-  action_type: "fixed" | "ai_instruction";
-  fixed_template: string | null;
-  ai_instruction: string | null;
-  auto_send: boolean;
-  enabled: boolean;
-  priority: number;
-  min_follower_count: number | null;
-  require_bio: boolean;
-  require_recent_posts: boolean;
-  ai_filter_enabled: boolean;
-  ai_filter_instruction: string | null;
-  daily_dm_cap: number;
-  daily_comment_cap: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface FollowerAction {
-  id: string;
-  follower_id: string;
-  action_rule_id: string | null;
-  message_type: "dm" | "comment";
-  message_text: string | null;
-  draft_text: string | null;
-  target_post_url: string | null;
-  approved: boolean;
-  auto_sent: boolean;
-  sent_at: string | null;
-  send_step: string | null;
-  created_at: string;
-}
-
-export interface QueuedFollowerAction {
-  follower_id: string;
-  action_id: string;
-  follower_username: string;
+export interface SidePanelItem {
+  commentId: string;
+  commentExternalId: string;
+  username: string;
+  commentText: string;
+  smartTag: string | null;
+  draftText: string | null;
   platform: Platform;
-  message_type: "dm" | "comment";
-  message_text: string;
-  target_post_url: string | null;
-  scheduled_for: number;
-  status: "queued" | "sending" | "sent" | "failed";
+  postUrl: string;
+  status: "pending" | "flagged";
 }

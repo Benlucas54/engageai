@@ -3,6 +3,47 @@ import { supabase } from "./supabaseAdmin.js";
 
 const anthropic = new Anthropic();
 
+const USER_ID = process.env.AGENT_USER_ID || "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0";
+
+/**
+ * Check if the agent feature is enabled for this user's plan.
+ */
+export async function checkAgentAccess() {
+  const { data: sub } = await supabase
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", USER_ID)
+    .single();
+
+  if (!sub || sub.plan_id === "free") {
+    return { allowed: false, reason: "Agent not available on Free plan" };
+  }
+
+  if (sub.status !== "active" && sub.status !== "trialing") {
+    return { allowed: false, reason: `Subscription status: ${sub.status}` };
+  }
+
+  return { allowed: true, subscription: sub };
+}
+
+/**
+ * Track AI reply usage for the agent.
+ */
+async function trackAgentUsage(subscription, count = 1) {
+  if (!subscription) return;
+  try {
+    await supabase.rpc("increment_usage", {
+      p_user_id: USER_ID,
+      p_period_start: subscription.current_period_start,
+      p_period_end: subscription.current_period_end,
+      p_field: "ai_replies_used",
+      p_amount: count,
+    });
+  } catch (err) {
+    console.error("[agent] Failed to track usage:", err.message);
+  }
+}
+
 export async function getVoiceWithDocuments() {
   const { data: voice } = await supabase
     .from("voice_settings")
@@ -92,32 +133,25 @@ export function detectFlagCondition(comment, voice) {
   return false;
 }
 
-export async function generateRepliesForBatch(comments, voice, docContext) {
+export async function generateRepliesForBatch(comments, voice, docContext, subscription) {
   const results = [];
 
   for (const comment of comments) {
     try {
-      const shouldFlag = detectFlagCondition(comment, voice);
       const replyText = await generateReply(comment, voice, docContext);
 
-      if (shouldFlag) {
-        await supabase.from("comments").update({ status: "flagged" }).eq("id", comment.id);
-        await supabase.from("replies").insert({
-          comment_id: comment.id,
-          reply_text: replyText,
-          draft_text: replyText,
-          approved: false,
-        });
-        results.push({ id: comment.id, status: "flagged" });
-      } else {
-        await supabase.from("replies").insert({
-          comment_id: comment.id,
-          reply_text: replyText,
-          draft_text: replyText,
-          approved: true,
-        });
-        results.push({ id: comment.id, status: "auto-approved" });
-      }
+      // All replies are draft suggestions — user decides what gets sent
+      await supabase.from("comments").update({ status: "flagged" }).eq("id", comment.id);
+      await supabase.from("replies").insert({
+        comment_id: comment.id,
+        reply_text: replyText,
+        draft_text: replyText,
+        approved: false,
+      });
+      results.push({ id: comment.id, status: "flagged" });
+
+      // Track usage
+      await trackAgentUsage(subscription);
 
       // 500ms delay between API calls
       await new Promise(r => setTimeout(r, 500));
@@ -136,6 +170,7 @@ export async function generateRepliesForBatch(comments, voice, docContext) {
             approved: false,
           });
           results.push({ id: comment.id, status: "flagged-retry" });
+          await trackAgentUsage(subscription);
         } catch (retryErr) {
           console.error(`Retry failed for comment ${comment.id}:`, retryErr.message);
           await supabase.from("comments").update({ status: "flagged" }).eq("id", comment.id);

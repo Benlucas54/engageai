@@ -1,39 +1,31 @@
 import { supabase } from "../lib/supabase";
+
+// Open side panel when toolbar icon is clicked (instead of popup)
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
+  .catch((err: unknown) => console.error("[EngageAI] setPanelBehavior failed:", err));
 import {
   generateReply,
-  detectFlagCondition,
+  generateEngagementComment,
   harvestLearnedExamples,
   tagComments,
 } from "../lib/claude";
 import {
-  getQueue,
-  addToQueue,
-  updateQueueItem,
-  removeFromQueue,
   getSettings,
   updateSettings,
-  updateBadge,
 } from "../lib/storage";
 import {
   upsertProfileCounters,
   getCommenterProfile,
   updateProfileSummaries,
 } from "../lib/profiles";
-import { matchAutomationRule } from "../lib/automations";
-import { matchFollowerActionRule } from "../lib/follower-actions";
 import type {
   Platform,
   ScrapedComment,
-  ScrapedFollower,
   Comment,
-  QueuedReply,
-  QueuedFollowerAction,
   ScanResult,
-  AutomationRule,
-  FollowerActionRule,
-  Follower,
   CommentMark,
   SmartTag,
+  SidePanelItem,
 } from "../lib/types";
 
 const SPAM_KEYWORDS = [
@@ -91,28 +83,6 @@ async function deduplicateComments(
   });
 }
 
-function getNextBatchTime(batchTimes: string[], jitterMinutes: number): number {
-  const now = new Date();
-  const today = now.toISOString().split("T")[0];
-
-  const futureTimes = batchTimes
-    .map((t) => new Date(`${today}T${t}:00`).getTime())
-    .filter((t) => t > now.getTime());
-
-  let baseTime: number;
-  if (futureTimes.length > 0) {
-    baseTime = Math.min(...futureTimes);
-  } else {
-    // Next day's first batch time
-    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const tomorrowStr = tomorrow.toISOString().split("T")[0];
-    baseTime = new Date(`${tomorrowStr}T${batchTimes[0]}:00`).getTime();
-  }
-
-  const jitterMs = Math.random() * jitterMinutes * 60 * 1000;
-  return baseTime + jitterMs;
-}
-
 // --- Message handlers ---
 
 async function handleScrape(
@@ -141,6 +111,13 @@ async function handleScrape(
     if (igAccount?.username) {
       ownerUsername = igAccount.username.replace(/^@/, "");
     }
+  }
+
+  // Cache owner username for engagement detection
+  if (ownerUsername) {
+    const { owner_usernames = {} } = await chrome.storage.local.get("owner_usernames");
+    owner_usernames[platform] = ownerUsername;
+    await chrome.storage.local.set({ owner_usernames });
   }
 
   // Send scrape message to content script, with retries if not ready
@@ -204,13 +181,9 @@ async function handleScrape(
 
   if (newComments.length === 0) {
     // All comments already in DB — surface only ones from THIS scan that need attention
-    const scrapedKeys = new Set(
-      scraped.map((c) => `${c.username}:${c.comment_text}`)
-    );
-
     const { data: existing, error: existingErr } = await supabase
       .from("comments")
-      .select("*")
+      .select("*, replies(*)")
       .eq("platform", platform)
       .in("status", ["pending", "flagged"])
       .order("created_at", { ascending: false })
@@ -218,40 +191,17 @@ async function handleScrape(
 
     console.log(`[EngageAI] Pending/flagged in DB:`, existing?.length ?? 0, "error:", existingErr?.message);
 
-    console.log(`[EngageAI] Pending/flagged to surface:`, (existing || []).length);
-
-    const results: ScanResult[] = [];
-    for (const comment of (existing || [])) {
-      const { data: reply } = await supabase
-        .from("replies")
-        .select("*")
-        .eq("comment_id", comment.id)
-        .limit(1)
-        .single();
-      results.push({
+    const results: ScanResult[] = (existing || []).map((row: any) => {
+      const { replies: r, ...comment } = row;
+      return {
         comment,
-        reply: reply || undefined,
+        reply: r?.[0] || undefined,
         status: comment.status === "flagged" ? "flagged" : "auto-approved",
-      });
-    }
+      };
+    });
     return results;
   }
 
-  // Get voice settings for flag detection (reply generation is now server-side)
-  const { data: voice } = await supabase
-    .from("voice_settings")
-    .select("*")
-    .limit(1)
-    .single();
-
-  // Fetch enabled automation rules, ordered by priority DESC
-  const { data: automationRules } = await supabase
-    .from("automation_rules")
-    .select("*")
-    .eq("enabled", true)
-    .order("priority", { ascending: false });
-
-  const settings = await getSettings();
   const results: ScanResult[] = [];
 
   // Phase 1: Insert all non-spam comments
@@ -268,15 +218,12 @@ async function handleScrape(
       continue;
     }
 
-    // X comments are force-flagged (monitor only)
-    const forceFlag = platform === "x";
-
-    // Insert comment
+    // Insert comment as flagged (suggestion pending)
     const { data: inserted, error } = await supabase
       .from("comments")
       .insert({
         ...comment,
-        status: forceFlag ? "flagged" : "pending",
+        status: "flagged",
         synced_at: new Date().toISOString(),
       })
       .select()
@@ -304,108 +251,45 @@ async function handleScrape(
 
   console.log(`[EngageAI] Tagged ${Object.keys(tagMap).length} comments`);
 
-  // Phase 3: For each comment, match rules (with smart_tag) → generate reply → flag/queue
+  // Phase 2.5: Write tags back to the comments table
+  for (const [commentId, tag] of Object.entries(tagMap)) {
+    await supabase
+      .from("comments")
+      .update({ smart_tag: tag })
+      .eq("id", commentId);
+  }
+
+  // Phase 3: For each comment, generate reply as draft suggestion
   for (const { inserted, original: comment } of insertedComments) {
     const smartTag = tagMap[inserted.id] || null;
-    const forceFlag = platform === "x";
 
-    // Check automation rules with smart tag
-    const matchedRule = matchAutomationRule(
-      comment.comment_text,
-      comment.platform,
-      (automationRules as AutomationRule[]) || [],
-      smartTag
-    );
-
-    // Generate reply
     try {
-      let replyText: string;
-      let shouldFlag: boolean;
+      const profile = await getCommenterProfile(comment.platform, comment.username);
+      const replyText = await generateReply(comment, profile);
 
-      if (matchedRule && !forceFlag) {
-        // Automation rule matched
-        console.log(`[EngageAI] Rule "${matchedRule.name}" matched for @${comment.username}`);
-
-        if (matchedRule.action_type === "fixed" && matchedRule.fixed_template) {
-          replyText = matchedRule.fixed_template.replace(
-            /\{username\}/g,
-            comment.username
-          );
-        } else {
-          const profile = await getCommenterProfile(comment.platform, comment.username);
-          replyText = await generateReply(
-            comment,
-            profile,
-            matchedRule.ai_instruction || undefined
-          );
-        }
-
-        shouldFlag = !matchedRule.auto_send;
-      } else {
-        // Default path — no rule matched
-        const profile = await getCommenterProfile(comment.platform, comment.username);
-        replyText = await generateReply(comment, profile);
-        shouldFlag =
-          forceFlag ||
-          detectFlagCondition(comment.comment_text, voice.auto_threshold, smartTag);
-      }
-
+      // All replies are draft suggestions — never auto-approve
       const { data: reply } = await supabase
         .from("replies")
         .insert({
           comment_id: inserted.id,
           reply_text: replyText,
           draft_text: replyText,
-          approved: !shouldFlag,
-          auto_sent: !shouldFlag,
-          ...(matchedRule ? { automation_rule_id: matchedRule.id } : {}),
+          approved: false,
+          auto_sent: false,
         })
         .select()
         .single();
 
-      if (shouldFlag) {
-        await supabase
-          .from("comments")
-          .update({ status: "flagged" })
-          .eq("id", inserted.id);
-        results.push({
-          comment: { ...inserted, status: "flagged" },
-          reply,
-          status: "flagged",
-        });
-      } else {
-        // Auto-approved — add to queue
-        const scheduledFor = getNextBatchTime(
-          settings.batch_times,
-          settings.jitter_minutes
-        );
-        await addToQueue({
-          comment_id: inserted.id,
-          comment_external_id: comment.comment_external_id,
-          reply_id: reply.id,
-          reply_text: replyText,
-          platform: comment.platform,
-          post_url: comment.post_url,
-          username: comment.username,
-          comment_text: comment.comment_text,
-          scheduled_for: scheduledFor,
-          status: "queued",
-        });
-        results.push({
-          comment: inserted,
-          reply,
-          status: "auto-approved",
-        });
-      }
+      results.push({
+        comment: { ...inserted, status: "flagged" },
+        reply,
+        status: "flagged",
+      });
 
       // Delay between API calls
       await new Promise((r) => setTimeout(r, 500));
     } catch (err) {
       console.error("Error generating reply:", err);
-      await supabase
-        .from("comments")
-        .update({ status: "flagged" })
-        .eq("id", inserted.id);
       results.push({ comment: inserted, status: "error" });
     }
   }
@@ -415,35 +299,43 @@ async function handleScrape(
     console.error("[EngageAI] Profile summary update failed:", err)
   );
 
+  // Send side panel update to the tab
+  sendSidePanelUpdate(tabId, platform);
+
   return results;
 }
 
-async function openMinimizedTab(url: string): Promise<{ tabId: number; windowId: number }> {
-  // Create an unfocused window so the page fully renders
-  // (minimized windows don't render interactive elements like reply modals)
-  const win = await chrome.windows.create({
-    url,
-    focused: false,
-    width: 1280,
-    height: 900,
-  });
-  const tabId = win.tabs?.[0]?.id;
-  if (!tabId || !win.id) throw new Error("Failed to create window");
+async function sendSidePanelUpdate(tabId: number, platform: Platform): Promise<void> {
+  try {
+    const { data: comments } = await supabase
+      .from("comments")
+      .select("id, comment_external_id, username, comment_text, smart_tag, status, platform, post_url, replies(draft_text)")
+      .eq("platform", platform)
+      .in("status", ["pending", "flagged"])
+      .order("created_at", { ascending: false })
+      .limit(50);
 
-  // Wait for tab to finish loading
-  await new Promise<void>((resolve) => {
-    const listener = (tid: number, info: chrome.tabs.TabChangeInfo) => {
-      if (tid === tabId && info.status === "complete") {
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-    chrome.tabs.onUpdated.addListener(listener);
-  });
+    if (!comments?.length) return;
 
-  // Wait for content script to inject
-  await new Promise((r) => setTimeout(r, 3000));
-  return { tabId, windowId: win.id };
+    const items: SidePanelItem[] = comments.map((c: any) => ({
+      commentId: c.id,
+      commentExternalId: c.comment_external_id,
+      username: c.username,
+      commentText: c.comment_text,
+      smartTag: c.smart_tag,
+      draftText: c.replies?.[0]?.draft_text || null,
+      platform: c.platform,
+      postUrl: c.post_url,
+      status: c.status as "pending" | "flagged",
+    }));
+
+    chrome.tabs.sendMessage(tabId, {
+      action: "UPDATE_SIDE_PANEL",
+      sidePanelItems: items,
+    }).catch(() => {});
+  } catch (err) {
+    console.error("[EngageAI] Side panel update failed:", err);
+  }
 }
 
 async function pollScanRequests(): Promise<void> {
@@ -470,7 +362,6 @@ async function pollScanRequests(): Promise<void> {
   console.log(`[EngageAI] Handling scan request: run ${run.id}`);
 
   let commentsFound = 0;
-  let repliesSent = 0;
   let flaggedCount = 0;
 
   try {
@@ -511,7 +402,6 @@ async function pollScanRequests(): Promise<void> {
           for (const r of results) {
             commentsFound++;
             if (r.status === "flagged") flaggedCount++;
-            if (r.status === "auto-approved") repliesSent++;
           }
         } catch (err) {
           console.error(`[EngageAI] ${platform} scan error:`, err);
@@ -531,14 +421,14 @@ async function pollScanRequests(): Promise<void> {
         status: "success",
         completed_at: new Date().toISOString(),
         comments_found: commentsFound,
-        replies_sent: repliesSent,
+        replies_sent: 0,
         flagged_count: flaggedCount,
         ...(noTabsMessage ? { error_message: noTabsMessage } : {}),
       })
       .eq("id", run.id);
 
     console.log(
-      `[EngageAI] Scan complete: ${commentsFound} comments, ${repliesSent} auto-approved, ${flaggedCount} flagged`
+      `[EngageAI] Scan complete: ${commentsFound} comments, ${flaggedCount} suggestions generated`
     );
   } catch (err) {
     console.error("[EngageAI] Scan request failed:", err);
@@ -609,573 +499,8 @@ async function autoScan(): Promise<void> {
   }
 }
 
-async function handleApprove(
-  commentId: string,
-  replyId: string,
-  replyText: string,
-  comment: {
-    comment_external_id: string;
-    platform: Platform;
-    post_url: string;
-    username: string;
-    comment_text: string;
-  }
-): Promise<void> {
-  await supabase
-    .from("replies")
-    .update({ approved: true, reply_text: replyText, draft_text: replyText })
-    .eq("id", replyId);
-
-  const settings = await getSettings();
-  const scheduledFor = getNextBatchTime(
-    settings.batch_times,
-    settings.jitter_minutes
-  );
-
-  await addToQueue({
-    comment_id: commentId,
-    comment_external_id: comment.comment_external_id,
-    reply_id: replyId,
-    reply_text: replyText,
-    platform: comment.platform,
-    post_url: comment.post_url,
-    username: comment.username,
-    comment_text: comment.comment_text,
-    scheduled_for: scheduledFor,
-    status: "queued",
-  });
-}
-
-async function runBatch(): Promise<void> {
-  const queue = await getQueue();
-  const now = Date.now();
-  const due = queue.filter(
-    (r) => r.scheduled_for <= now && r.status === "queued"
-  );
-
-  for (const item of due) {
-    let windowId: number | undefined;
-    try {
-      await updateQueueItem(item.comment_id, { status: "sending" });
-
-      // Store current reply_id so the storage listener can sync steps to Supabase
-      await chrome.storage.local.set({
-        send_reply_id: item.reply_id,
-        send_status: { step: "opening", username: item.username, platform: item.platform, ts: Date.now() },
-      });
-      await supabase.from("replies").update({ send_step: "opening" }).eq("id", item.reply_id);
-
-      // Open post in a background window
-      const opened = await openMinimizedTab(item.post_url);
-      windowId = opened.windowId;
-      const tabId = opened.tabId;
-
-      // Send post reply message to content script, retrying until it connects
-      let response: { success?: boolean } | undefined;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          response = await chrome.tabs.sendMessage(tabId, {
-            action: "POST_REPLY",
-            payload: item,
-          });
-          break;
-        } catch {
-          console.log(`[EngageAI] POST_REPLY attempt ${attempt + 1}/5 — content script not ready`);
-          await new Promise((r) => setTimeout(r, 3000));
-        }
-      }
-      if (!response) throw new Error("Content script never connected");
-
-      if (response?.success) {
-        await supabase
-          .from("replies")
-          .update({ sent_at: new Date().toISOString(), send_step: "done" })
-          .eq("id", item.reply_id);
-        await supabase
-          .from("comments")
-          .update({ status: "replied" })
-          .eq("id", item.comment_id);
-        await updateQueueItem(item.comment_id, { status: "sent" });
-      } else {
-        await supabase
-          .from("replies")
-          .update({ send_step: "error" })
-          .eq("id", item.reply_id);
-        await updateQueueItem(item.comment_id, { status: "failed" });
-      }
-
-      // Humanised delay between replies (8-20 seconds)
-      await new Promise((r) =>
-        setTimeout(r, 8000 + Math.random() * 12000)
-      );
-    } catch (err) {
-      console.error("Error in batch send:", err);
-      await updateQueueItem(item.comment_id, { status: "failed" });
-    } finally {
-      // Always close the window, even on error
-      if (windowId) {
-        await chrome.windows.remove(windowId).catch(() => {});
-      }
-    }
-  }
-
-  // Remove sent items from queue
-  const updatedQueue = await getQueue();
-  await chrome.storage.local.set({
-    queue: updatedQueue.filter((r) => r.status !== "sent"),
-  });
-  await updateBadge();
-}
-
-async function pollDashboardApprovals(): Promise<void> {
-  // Check Supabase for replies approved via dashboard but not yet sent
-  const { data: pendingReplies } = await supabase
-    .from("replies")
-    .select("*, comments(*)")
-    .eq("approved", true)
-    .is("sent_at", null)
-    .limit(20);
-
-  if (!pendingReplies?.length) return;
-
-  const queue = await getQueue();
-  const queuedIds = new Set(queue.map((q) => q.comment_id));
-
-  for (const reply of pendingReplies) {
-    const comment = reply.comments;
-    if (!comment || comment.status === "replied" || comment.status === "hidden") continue;
-    if (queuedIds.has(comment.id)) continue;
-
-    await addToQueue({
-      comment_id: comment.id,
-      comment_external_id: comment.comment_external_id || "",
-      reply_id: reply.id,
-      reply_text: reply.reply_text,
-      platform: comment.platform,
-      post_url: comment.post_url || "",
-      username: comment.username,
-      comment_text: comment.comment_text,
-      scheduled_for: Date.now(),
-      status: "queued",
-    });
-    console.log(`[EngageAI] Queued dashboard-approved reply for @${comment.username}`);
-  }
-
-  await runBatch();
-}
-
-// --- Follower scan pipeline ---
-
-async function getFollowerQueue(): Promise<QueuedFollowerAction[]> {
-  const { follower_queue = [] } = await chrome.storage.local.get("follower_queue");
-  return follower_queue;
-}
-
-async function addToFollowerQueue(item: QueuedFollowerAction): Promise<void> {
-  const queue = await getFollowerQueue();
-  queue.push(item);
-  await chrome.storage.local.set({ follower_queue: queue });
-}
-
-async function updateFollowerQueueItem(
-  actionId: string,
-  updates: Partial<QueuedFollowerAction>
-): Promise<void> {
-  const queue = await getFollowerQueue();
-  const idx = queue.findIndex((r) => r.action_id === actionId);
-  if (idx !== -1) {
-    queue[idx] = { ...queue[idx], ...updates };
-    await chrome.storage.local.set({ follower_queue: queue });
-  }
-}
-
-async function getTodayActionCounts(): Promise<{ dms: number; comments: number }> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const { data: actions } = await supabase
-    .from("follower_actions")
-    .select("message_type, sent_at")
-    .gte("sent_at", todayStart.toISOString());
-
-  let dms = 0;
-  let comments = 0;
-  for (const a of actions || []) {
-    if (a.message_type === "dm") dms++;
-    else comments++;
-  }
-  return { dms, comments };
-}
-
-async function handleFollowerScan(
-  tabId: number,
-  platform: Platform
-): Promise<void> {
-  // Only supported platforms
-  if (platform !== "instagram" && platform !== "threads" && platform !== "tiktok") return;
-
-  console.log(`[EngageAI] Follower scan: ${platform} tab ${tabId}`);
-
-  // 1. Send SCRAPE_NOTIFICATIONS to content script
-  let response: { success?: boolean; followers?: ScrapedFollower[] } | undefined;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      response = await chrome.tabs.sendMessage(tabId, {
-        action: "SCRAPE_NOTIFICATIONS",
-      });
-      break;
-    } catch {
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, 2000));
-      } else {
-        console.log(`[EngageAI] Content script not available for follower scan on tab ${tabId}`);
-        return;
-      }
-    }
-  }
-
-  if (!response?.success || !response.followers?.length) {
-    console.log(`[EngageAI] No follow notifications found on ${platform}`);
-    return;
-  }
-
-  const scraped = response.followers;
-  console.log(`[EngageAI] Scraped ${scraped.length} follow notifications from ${platform}`);
-
-  // 2. Deduplicate against followers table
-  const { data: existingFollowers } = await supabase
-    .from("followers")
-    .select("username")
-    .eq("platform", platform);
-
-  const existingSet = new Set(
-    (existingFollowers || []).map((f: { username: string }) => f.username.toLowerCase())
-  );
-
-  const newFollowers = scraped.filter(
-    (f) => !existingSet.has(f.username.toLowerCase())
-  );
-
-  if (newFollowers.length === 0) {
-    console.log(`[EngageAI] All followers already known`);
-    return;
-  }
-
-  console.log(`[EngageAI] ${newFollowers.length} new followers to process`);
-
-  // 3. Insert new followers
-  for (const f of newFollowers) {
-    await supabase.from("followers").insert({
-      platform: f.platform,
-      username: f.username,
-      display_name: f.display_name || null,
-      status: "new",
-    });
-  }
-
-  // 4. Scrape profile data for each new follower
-  for (const f of newFollowers) {
-    try {
-      const profileResponse = await chrome.tabs.sendMessage(tabId, {
-        action: "SCRAPE_FOLLOWER_PROFILE",
-        username: f.username,
-      });
-
-      if (profileResponse?.success) {
-        await supabase
-          .from("followers")
-          .update({
-            bio: profileResponse.bio || null,
-            follower_count: profileResponse.follower_count || null,
-            following_count: profileResponse.following_count || null,
-            post_count: profileResponse.post_count || null,
-            has_recent_posts: profileResponse.has_recent_posts || null,
-            display_name: profileResponse.display_name || f.display_name || null,
-            profile_pic_url: profileResponse.profile_pic_url || null,
-          })
-          .eq("platform", platform)
-          .eq("username", f.username);
-      }
-
-      await new Promise((r) => setTimeout(r, 1000)); // Rate limit
-    } catch {
-      console.log(`[EngageAI] Failed to scrape profile for @${f.username}`);
-    }
-  }
-
-  // 5. Fetch action rules and match
-  const { data: actionRules } = await supabase
-    .from("follower_action_rules")
-    .select("*")
-    .eq("enabled", true)
-    .order("priority", { ascending: false });
-
-  if (!actionRules?.length) {
-    console.log(`[EngageAI] No follower action rules configured`);
-    return;
-  }
-
-  // 6. Fetch updated follower records (with profile data)
-  const { data: dbFollowers } = await supabase
-    .from("followers")
-    .select("*")
-    .eq("platform", platform)
-    .eq("status", "new")
-    .in("username", newFollowers.map((f) => f.username));
-
-  if (!dbFollowers?.length) return;
-
-  const todayCounts = await getTodayActionCounts();
-
-  for (const follower of dbFollowers as Follower[]) {
-    // Match against action rules
-    const matchedRule = matchFollowerActionRule(
-      follower,
-      platform,
-      actionRules as FollowerActionRule[]
-    );
-
-    if (!matchedRule) continue;
-
-    // Check daily caps
-    if (matchedRule.message_type === "dm" && todayCounts.dms >= matchedRule.daily_dm_cap) {
-      console.log(`[EngageAI] Daily DM cap reached for @${follower.username}`);
-      continue;
-    }
-    if (matchedRule.message_type === "comment" && todayCounts.comments >= matchedRule.daily_comment_cap) {
-      console.log(`[EngageAI] Daily comment cap reached for @${follower.username}`);
-      continue;
-    }
-
-    // Generate message
-    let messageText: string;
-    if (matchedRule.action_type === "fixed" && matchedRule.fixed_template) {
-      messageText = matchedRule.fixed_template.replace(/\{username\}/g, follower.username);
-    } else {
-      // Use AI generation
-      try {
-        const API_URL = (import.meta as Record<string, Record<string, string>>).env?.VITE_API_URL || "http://localhost:3000";
-        const res = await fetch(`${API_URL}/api/generate-follower-message`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            follower,
-            instruction: matchedRule.ai_instruction,
-            messageType: matchedRule.message_type,
-          }),
-        });
-        const data = await res.json();
-        messageText = data.message || `Hey @${follower.username}! Thanks for following!`;
-      } catch {
-        messageText = `Hey @${follower.username}! Thanks for following!`;
-      }
-    }
-
-    // Create follower action record
-    const { data: action } = await supabase
-      .from("follower_actions")
-      .insert({
-        follower_id: follower.id,
-        action_rule_id: matchedRule.id,
-        message_type: matchedRule.message_type,
-        message_text: messageText,
-        draft_text: messageText,
-        approved: matchedRule.auto_send,
-        auto_sent: matchedRule.auto_send,
-      })
-      .select()
-      .single();
-
-    if (!action) continue;
-
-    if (matchedRule.auto_send) {
-      // Add to follower action queue
-      const settings = await getSettings();
-      await addToFollowerQueue({
-        follower_id: follower.id,
-        action_id: action.id,
-        follower_username: follower.username,
-        platform: follower.platform as Platform,
-        message_type: matchedRule.message_type,
-        message_text: messageText,
-        target_post_url: null,
-        scheduled_for: getNextBatchTime(settings.batch_times, settings.jitter_minutes),
-        status: "queued",
-      });
-      todayCounts[matchedRule.message_type === "dm" ? "dms" : "comments"]++;
-      console.log(`[EngageAI] Auto-queued ${matchedRule.message_type} for @${follower.username}`);
-    } else {
-      console.log(`[EngageAI] Flagged ${matchedRule.message_type} for review: @${follower.username}`);
-    }
-  }
-}
-
-async function runFollowerBatch(): Promise<void> {
-  const queue = await getFollowerQueue();
-  const now = Date.now();
-  const due = queue.filter(
-    (r) => r.scheduled_for <= now && r.status === "queued"
-  );
-
-  for (const item of due) {
-    let windowId: number | undefined;
-    try {
-      await updateFollowerQueueItem(item.action_id, { status: "sending" });
-
-      await chrome.storage.local.set({
-        send_status: { step: "opening", username: item.follower_username, platform: item.platform, ts: Date.now() },
-      });
-
-      // Determine URL to open
-      const platformUrls: Record<string, string> = {
-        instagram: "https://www.instagram.com/",
-        threads: "https://www.threads.net/",
-        tiktok: "https://www.tiktok.com/",
-      };
-      const baseUrl = platformUrls[item.platform] || "https://www.instagram.com/";
-
-      const opened = await openMinimizedTab(baseUrl);
-      windowId = opened.windowId;
-      const tabId = opened.tabId;
-
-      // Send DM or comment
-      const action = item.message_type === "dm" ? "SEND_DM" : "COMMENT_ON_POST";
-      let response: { success?: boolean } | undefined;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          response = await chrome.tabs.sendMessage(tabId, {
-            action,
-            username: item.follower_username,
-            messageText: item.message_text,
-            postUrl: item.target_post_url || undefined,
-          });
-          break;
-        } catch {
-          console.log(`[EngageAI] ${action} attempt ${attempt + 1}/5 — content script not ready`);
-          await new Promise((r) => setTimeout(r, 3000));
-        }
-      }
-
-      if (response?.success) {
-        await supabase
-          .from("follower_actions")
-          .update({ sent_at: new Date().toISOString(), send_step: "done" })
-          .eq("id", item.action_id);
-        await supabase
-          .from("followers")
-          .update({ status: "actioned" })
-          .eq("id", item.follower_id);
-        await updateFollowerQueueItem(item.action_id, { status: "sent" });
-        console.log(`[EngageAI] Sent ${item.message_type} to @${item.follower_username}`);
-      } else {
-        await supabase
-          .from("follower_actions")
-          .update({ send_step: "error" })
-          .eq("id", item.action_id);
-        await updateFollowerQueueItem(item.action_id, { status: "failed" });
-      }
-
-      // Humanized delay between sends (8-20 seconds)
-      await new Promise((r) => setTimeout(r, 8000 + Math.random() * 12000));
-    } catch (err) {
-      console.error("[EngageAI] Error in follower batch send:", err);
-      await updateFollowerQueueItem(item.action_id, { status: "failed" });
-    } finally {
-      if (windowId) {
-        await chrome.windows.remove(windowId).catch(() => {});
-      }
-    }
-  }
-
-  // Remove sent items
-  const updated = await getFollowerQueue();
-  await chrome.storage.local.set({
-    follower_queue: updated.filter((r) => r.status !== "sent"),
-  });
-}
-
-async function pollFollowerApprovals(): Promise<void> {
-  // Check for follower actions approved via dashboard but not yet sent
-  const { data: pendingActions } = await supabase
-    .from("follower_actions")
-    .select("*, followers(*)")
-    .eq("approved", true)
-    .is("sent_at", null)
-    .limit(20);
-
-  if (!pendingActions?.length) return;
-
-  const queue = await getFollowerQueue();
-  const queuedIds = new Set(queue.map((q) => q.action_id));
-
-  for (const action of pendingActions) {
-    const follower = action.followers;
-    if (!follower || queuedIds.has(action.id)) continue;
-
-    await addToFollowerQueue({
-      follower_id: follower.id,
-      action_id: action.id,
-      follower_username: follower.username,
-      platform: follower.platform as Platform,
-      message_type: action.message_type,
-      message_text: action.message_text || action.draft_text || "",
-      target_post_url: action.target_post_url || null,
-      scheduled_for: Date.now(),
-      status: "queued",
-    });
-    console.log(`[EngageAI] Queued dashboard-approved follower action for @${follower.username}`);
-  }
-
-  await runFollowerBatch();
-}
-
-async function autoFollowerScan(): Promise<void> {
-  // Check if follower scanning is enabled
-  const { follower_scan_enabled = true } = await chrome.storage.local.get("follower_scan_enabled");
-  if (!follower_scan_enabled) return;
-
-  console.log("[EngageAI] Auto follower scan starting...");
-
-  const { data: accounts } = await supabase
-    .from("linked_accounts")
-    .select("platform, enabled")
-    .eq("enabled", true);
-  const enabledPlatforms = new Set(
-    (accounts || []).map((a: { platform: string }) => a.platform)
-  );
-
-  const followerPlatforms: [Platform, string][] = [
-    ["instagram", "instagram.com"],
-    ["threads", "threads.net"],
-    ["tiktok", "tiktok.com"],
-  ];
-
-  for (const [platform, urlPattern] of followerPlatforms) {
-    if (!enabledPlatforms.has(platform)) continue;
-    const tabs = await chrome.tabs.query({ url: `*://*.${urlPattern}/*` });
-    for (const tab of tabs) {
-      if (!tab.id || !tab.url) continue;
-      // Only scan notification/activity pages
-      const url = tab.url.toLowerCase();
-      const isNotificationPage =
-        url.includes("/activity") ||
-        url.includes("/notifications") ||
-        url.includes("/accounts/activity") ||
-        url.includes("/inbox");
-      if (!isNotificationPage) continue;
-
-      try {
-        await handleFollowerScan(tab.id, platform);
-      } catch (err) {
-        console.error(`[EngageAI] Follower scan error on ${platform}:`, err);
-      }
-    }
-  }
-}
-
-function scheduleBatchAlarms(): void {
+function scheduleScanAlarms(): void {
   chrome.alarms.clearAll();
-  // Poll for dashboard-approved replies every minute
-  chrome.alarms.create("poll_approvals", { periodInMinutes: 1 });
   // Poll for "Run Now" scan requests every 15 seconds
   chrome.alarms.create("poll_scan", { periodInMinutes: 0.25 });
   // Auto-scan for new comments (interval from settings)
@@ -1185,89 +510,47 @@ function scheduleBatchAlarms(): void {
       chrome.alarms.create("auto_scan", { periodInMinutes: interval });
     }
   });
-  // Follower scan alarm (default 30 min)
-  chrome.storage.local.get("follower_scan_interval_minutes", ({ follower_scan_interval_minutes }) => {
-    const interval = follower_scan_interval_minutes || 30;
-    chrome.alarms.create("follower_scan", { periodInMinutes: interval });
-  });
-  // Poll for follower approvals every minute
-  chrome.alarms.create("poll_follower_approvals", { periodInMinutes: 1 });
-
-  getSettings().then((settings) => {
-    for (const time of settings.batch_times) {
-      const [hours, minutes] = time.split(":").map(Number);
-      const now = new Date();
-      const alarmTime = new Date();
-      alarmTime.setHours(hours, minutes, 0, 0);
-
-      if (alarmTime.getTime() <= now.getTime()) {
-        alarmTime.setDate(alarmTime.getDate() + 1);
-      }
-
-      const jitterMs = Math.random() * settings.jitter_minutes * 60 * 1000;
-      const delayMs = alarmTime.getTime() - now.getTime() + jitterMs;
-
-      chrome.alarms.create(`batch_${time}`, {
-        delayInMinutes: delayMs / 60000,
-        periodInMinutes: 24 * 60,
-      });
-    }
-  });
 }
-
-// --- Sync send_status from content scripts to Supabase ---
-
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.send_status) return;
-  const status = changes.send_status.newValue;
-  if (!status?.step) return;
-
-  // Mirror the step to the reply record in Supabase
-  chrome.storage.local.get("send_reply_id", ({ send_reply_id }) => {
-    if (!send_reply_id) return;
-    supabase
-      .from("replies")
-      .update({ send_step: status.step })
-      .eq("id", send_reply_id)
-      .then(() => {
-        console.log(`[EngageAI] Synced send_step "${status.step}" to Supabase`);
-      });
-  });
-});
 
 // --- Event listeners ---
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
     settings: {
-      batch_times: ["11:00", "16:00"],
-      auto_threshold: "simple",
       active_platforms: ["instagram", "threads"],
-      jitter_minutes: 15,
       scan_interval_minutes: 5,
     },
-    queue: [],
-    follower_queue: [],
-    follower_scan_enabled: true,
-    follower_scan_interval_minutes: 30,
+    side_panel_enabled: true,
+    side_panel_collapsed: true,
+    inline_helper_enabled: true,
   });
-  scheduleBatchAlarms();
+  scheduleScanAlarms();
+  // Cache owner usernames for engagement detection
+  cacheOwnerUsernames();
 });
 
+async function cacheOwnerUsernames(): Promise<void> {
+  try {
+    const { data: accounts } = await supabase
+      .from("linked_accounts")
+      .select("platform, username")
+      .eq("enabled", true);
+    if (!accounts?.length) return;
+    const owner_usernames: Record<string, string> = {};
+    for (const a of accounts) {
+      owner_usernames[a.platform] = (a.username || "").replace(/^@/, "");
+    }
+    await chrome.storage.local.set({ owner_usernames });
+  } catch (err) {
+    console.error("[EngageAI] Failed to cache owner usernames:", err);
+  }
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "poll_approvals") {
-    pollDashboardApprovals();
-  } else if (alarm.name === "poll_scan") {
+  if (alarm.name === "poll_scan") {
     pollScanRequests();
   } else if (alarm.name === "auto_scan") {
     autoScan();
-  } else if (alarm.name === "follower_scan") {
-    autoFollowerScan();
-  } else if (alarm.name === "poll_follower_approvals") {
-    pollFollowerApprovals();
-  } else if (alarm.name.startsWith("batch_")) {
-    runBatch();
-    runFollowerBatch();
   }
 });
 
@@ -1291,7 +574,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // Fetch existing comments for this platform
         const { data: existing } = await supabase
           .from("comments")
-          .select("*")
+          .select("*, replies(*)")
           .eq("platform", platform)
           .order("created_at", { ascending: false })
           .limit(50);
@@ -1299,17 +582,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // Merge: new results + existing items (deduped)
         const newIds = new Set(newResults.map((r) => r.comment.id));
         const allResults = [...newResults];
-        for (const comment of (existing || [])) {
-          if (newIds.has(comment.id)) continue;
-          const { data: reply } = await supabase
-            .from("replies")
-            .select("*")
-            .eq("comment_id", comment.id)
-            .limit(1)
-            .single();
+        for (const row of (existing || [])) {
+          if (newIds.has(row.id)) continue;
+          const { replies: r, ...comment } = row as any;
           allResults.push({
             comment,
-            reply: reply || undefined,
+            reply: r?.[0] || undefined,
             status: comment.status === "flagged" ? "flagged" : "auto-approved",
           });
         }
@@ -1322,7 +600,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           .filter((r) => {
             const s = r.comment.status;
             if (s !== "pending" && s !== "flagged") return false;
-            // Exclude comments that already have a sent reply
             if (r.reply?.sent_at) return false;
             return true;
           })
@@ -1331,6 +608,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             username: r.comment.username,
             comment_text_prefix: r.comment.comment_text.slice(0, 20),
             status: r.comment.status as "pending" | "flagged",
+            draftText: r.reply?.draft_text || r.reply?.reply_text || undefined,
+            postUrl: r.comment.post_url,
+            commentId: r.comment.id,
           }));
         if (marks.length > 0) {
           chrome.tabs.sendMessage(tab.id!, { action: "MARK_COMMENTS", marks }).catch(() => {});
@@ -1345,64 +625,304 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true; // async response
   }
 
-  if (message.action === "APPROVE_REPLY") {
-    handleApprove(
-      message.commentId,
-      message.replyId,
-      message.replyText,
-      message.comment
-    ).then(() => sendResponse({ success: true }));
-    return true;
-  }
+  if (message.action === "LOAD_CACHED") {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      const platform = tab?.url ? detectPlatform(tab.url) : null;
+      try {
+        // Fetch active comments (pending/flagged)
+        let query = supabase
+          .from("comments")
+          .select("*, replies(*)")
+          .in("status", ["pending", "flagged"])
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (platform) query = query.eq("platform", platform);
 
-  if (message.action === "SEND_NOW") {
-    const item = message.item as QueuedReply;
-    updateQueueItem(item.comment_id, {
-      scheduled_for: Date.now(),
-      status: "queued",
-    }).then(() => {
-      runBatch().then(() => sendResponse({ success: true }));
+        const { data: comments, error } = await query;
+        if (error) { sendResponse({ success: false, error: error.message }); return; }
+
+        // Fetch dismissed comments
+        let dismissedQuery = supabase
+          .from("comments")
+          .select("*, replies(*)")
+          .eq("status", "dismissed")
+          .order("created_at", { ascending: false })
+          .limit(30);
+        if (platform) dismissedQuery = dismissedQuery.eq("platform", platform);
+
+        const { data: dismissedComments } = await dismissedQuery;
+
+        const results: ScanResult[] = [];
+        const needsGeneration: Comment[] = [];
+
+        for (const row of (comments || [])) {
+          const { replies: r, ...comment } = row as any;
+          const reply = r?.[0] || undefined;
+          results.push({
+            comment,
+            reply,
+            status: comment.status === "flagged" ? "flagged" : "auto-approved",
+          });
+          if (!reply) needsGeneration.push(comment as Comment);
+        }
+
+        // Build dismissed results
+        const dismissed: ScanResult[] = (dismissedComments || []).map((row: any) => {
+          const { replies: r, ...comment } = row;
+          return {
+            comment,
+            reply: r?.[0] || undefined,
+            status: "flagged" as const,
+          };
+        });
+
+        sendResponse({ success: true, results, dismissed, platform });
+
+        // Fire-and-forget: generate replies for comments missing them
+        if (needsGeneration.length > 0) {
+          console.log(`[EngageAI] Generating replies for ${needsGeneration.length} comments without drafts`);
+          for (const comment of needsGeneration) {
+            try {
+              const profile = await getCommenterProfile(comment.platform, comment.username);
+              const replyText = await generateReply(comment, profile);
+              await supabase.from("replies").insert({
+                comment_id: comment.id,
+                reply_text: replyText,
+                draft_text: replyText,
+                approved: false,
+                auto_sent: false,
+              });
+              console.log(`[EngageAI] Generated reply for comment ${comment.id}`);
+            } catch (err) {
+              console.error(`[EngageAI] Failed to generate reply for ${comment.id}:`, err);
+            }
+          }
+        }
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
     });
     return true;
   }
 
-  if (message.action === "REMOVE_FROM_QUEUE") {
-    removeFromQueue(message.commentId).then(() =>
-      sendResponse({ success: true })
-    );
+  if (message.action === "DISMISS_COMMENT") {
+    (async () => {
+      try {
+        const { commentId } = message;
+        if (!commentId) { sendResponse({ success: false, error: "No comment ID" }); return; }
+        const { error } = await supabase
+          .from("comments")
+          .update({ status: "dismissed" })
+          .eq("id", commentId);
+        sendResponse({ success: !error, error: error?.message });
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
+    return true;
+  }
+
+  if (message.action === "RESTORE_COMMENT") {
+    (async () => {
+      try {
+        const { commentId } = message;
+        if (!commentId) { sendResponse({ success: false, error: "No comment ID" }); return; }
+        const { error } = await supabase
+          .from("comments")
+          .update({ status: "flagged" })
+          .eq("id", commentId);
+        sendResponse({ success: !error, error: error?.message });
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
     return true;
   }
 
   if (message.action === "UPDATE_SETTINGS") {
     updateSettings(message.settings).then(() => {
-      scheduleBatchAlarms();
+      scheduleScanAlarms();
       sendResponse({ success: true });
     });
     return true;
   }
 
-  if (message.action === "SCAN_FOLLOWERS") {
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
-      const tab = tabs[0];
-      if (!tab?.id || !tab.url) {
-        sendResponse({ success: false, error: "No active tab" });
-        return;
-      }
-      const platform = detectPlatform(tab.url);
-      if (!platform || !["instagram", "threads", "tiktok"].includes(platform)) {
-        sendResponse({ success: false, error: `Follower scanning not supported for ${platform || "unknown"}` });
-        return;
-      }
+  if (message.action === "GENERATE_SUGGESTION_FOR_COMMENT") {
+    (async () => {
       try {
-        await handleFollowerScan(tab.id, platform);
-        sendResponse({ success: true, platform });
+        const { commentExternalId, forceRegenerate } = message;
+        if (!commentExternalId) {
+          sendResponse({ success: false, error: "No comment external ID" });
+          return;
+        }
+        // Find the comment in Supabase
+        const { data: comment } = await supabase
+          .from("comments")
+          .select("*")
+          .eq("comment_external_id", commentExternalId)
+          .limit(1)
+          .single();
+        if (!comment) {
+          sendResponse({ success: false, error: "Comment not found" });
+          return;
+        }
+        // Check if reply already exists (unless force regenerate)
+        if (!forceRegenerate) {
+          const { data: existingReply } = await supabase
+            .from("replies")
+            .select("*")
+            .eq("comment_id", comment.id)
+            .limit(1)
+            .single();
+          if (existingReply?.draft_text) {
+            sendResponse({ success: true, draftText: existingReply.draft_text, commentId: comment.id });
+            return;
+          }
+        }
+        // Generate a new reply via the API
+        const profile = await getCommenterProfile(comment.platform, comment.username);
+        const replyText = await generateReply(comment, profile);
+        // Save the reply (upsert for regenerate)
+        if (forceRegenerate) {
+          await supabase
+            .from("replies")
+            .update({ reply_text: replyText, draft_text: replyText })
+            .eq("comment_id", comment.id);
+          sendResponse({ success: true, draftText: replyText, commentId: comment.id });
+        } else {
+          const { data: reply } = await supabase
+            .from("replies")
+            .insert({
+              comment_id: comment.id,
+              reply_text: replyText,
+              draft_text: replyText,
+              approved: false,
+              auto_sent: false,
+            })
+            .select()
+            .single();
+          sendResponse({ success: true, draftText: replyText, commentId: comment.id, replyId: reply?.id });
+        }
       } catch (err) {
-        sendResponse({
-          success: false,
-          error: err instanceof Error ? err.message : "Unknown error",
-        });
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
       }
-    });
+    })();
+    return true;
+  }
+
+  if (message.action === "GENERATE_SUGGESTION_INLINE") {
+    (async () => {
+      try {
+        const { username, commentText, commentExternalId, platform, postUrl, postTitle, forceRegenerate } = message;
+        if (!username || !commentText) {
+          sendResponse({ success: false, error: "Missing username or commentText" });
+          return;
+        }
+
+        // Check if comment already exists in DB
+        let commentId: string;
+        const { data: existingComment } = await supabase
+          .from("comments")
+          .select("id")
+          .eq("comment_external_id", commentExternalId)
+          .limit(1)
+          .single();
+
+        if (existingComment) {
+          commentId = existingComment.id;
+        } else {
+          // Insert it
+          const { data: inserted, error } = await supabase
+            .from("comments")
+            .insert({
+              platform,
+              username,
+              comment_text: commentText,
+              post_title: postTitle || "Post",
+              post_url: postUrl || "",
+              comment_external_id: commentExternalId,
+              status: "flagged",
+              synced_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+          if (error || !inserted) {
+            sendResponse({ success: false, error: "Failed to insert comment" });
+            return;
+          }
+          commentId = inserted.id;
+        }
+
+        // Check for existing reply (unless force regenerate)
+        if (!forceRegenerate) {
+          const { data: existingReply } = await supabase
+            .from("replies")
+            .select("draft_text")
+            .eq("comment_id", commentId)
+            .limit(1)
+            .single();
+          if (existingReply?.draft_text) {
+            sendResponse({ success: true, draftText: existingReply.draft_text });
+            return;
+          }
+        }
+
+        // Generate reply
+        const profile = await getCommenterProfile(platform, username);
+        const replyText = await generateReply(
+          { platform, username, comment_text: commentText, post_title: postTitle || "Post", post_url: postUrl || "", comment_external_id: commentExternalId, created_at: new Date().toISOString() },
+          profile
+        );
+
+        // Save
+        if (forceRegenerate) {
+          await supabase
+            .from("replies")
+            .update({ reply_text: replyText, draft_text: replyText })
+            .eq("comment_id", commentId);
+        } else {
+          await supabase
+            .from("replies")
+            .insert({
+              comment_id: commentId,
+              reply_text: replyText,
+              draft_text: replyText,
+              approved: false,
+              auto_sent: false,
+            });
+        }
+
+        sendResponse({ success: true, draftText: replyText });
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
+    return true;
+  }
+
+  if (message.action === "GENERATE_ENGAGEMENT_INLINE") {
+    (async () => {
+      try {
+        const { platform, postAuthor, postCaption, postUrl, existingComments } = message;
+        if (!platform || !postCaption) {
+          sendResponse({ success: false, error: "Missing platform or post caption" });
+          return;
+        }
+
+        const commentText = await generateEngagementComment({
+          platform,
+          postAuthor: postAuthor || "",
+          postCaption,
+          postUrl: postUrl || "",
+          existingComments: existingComments || [],
+        });
+
+        sendResponse({ success: true, draftText: commentText });
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
     return true;
   }
 });

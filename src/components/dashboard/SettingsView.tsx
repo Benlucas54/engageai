@@ -16,6 +16,11 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getSupabase } from "@/lib/supabase";
 import { TAG_COLOR_PRESETS } from "@/lib/constants";
 import type { SmartTagDefinition } from "@/lib/types";
+import { BillingCard } from "@/components/dashboard/BillingCard";
+import { UsageCard } from "@/components/dashboard/UsageCard";
+import { useSubscription } from "@/hooks/useSubscription";
+import { isUnlimited } from "@/lib/plans";
+import { UpgradePrompt } from "@/components/dashboard/UpgradePrompt";
 
 const USER_ID = "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0";
 
@@ -731,10 +736,19 @@ export function SettingsView() {
   const { profiles, loading, createProfile, updateProfile, deleteProfile, refetch } =
     useProfiles();
   const [editingProfile, setEditingProfile] = useState<ProfileWithAccounts | null>(null);
+  const [profileLimitHit, setProfileLimitHit] = useState(false);
+  const { limits } = useSubscription();
 
   if (loading) return null;
 
+  const maxProfiles = limits?.max_profiles ?? 1;
+  const canCreateProfile = isUnlimited(maxProfiles) || profiles.length < maxProfiles;
+
   const handleCreate = async () => {
+    if (!canCreateProfile) {
+      setProfileLimitHit(true);
+      return;
+    }
     const profile = await createProfile(USER_ID);
     if (profile) setEditingProfile(profile);
   };
@@ -768,9 +782,20 @@ export function SettingsView() {
         </div>
       </Card>
 
+      {profileLimitHit && (
+        <UpgradePrompt
+          feature="More profiles"
+          description={`Your plan allows ${maxProfiles} profile${maxProfiles === 1 ? "" : "s"}. Upgrade to add more.`}
+        />
+      )}
+
       <VoicesCard profiles={profiles} />
 
       <SmartTagsCard />
+
+      <BillingCard />
+
+      <UsageCard />
 
       <AccountCard />
 

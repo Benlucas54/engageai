@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@/lib/supabase-server";
+import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 interface VoiceSettings {
   tone: string;
@@ -184,6 +185,15 @@ export async function POST(req: NextRequest) {
         { error: "Missing comment data" },
         { status: 400 }
       );
+    }
+
+    // Usage gating
+    const userId = await getUserFromRequest(req);
+    if (userId) {
+      const gate = await withUsageGating(userId, "ai_replies");
+      if (!gate.allowed) {
+        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
+      }
     }
 
     const supabase = createServerClient();

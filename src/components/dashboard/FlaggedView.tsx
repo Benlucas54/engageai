@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { getSupabase } from "@/lib/supabase";
 import { useComments } from "@/hooks/useComments";
 import { useSmartTags } from "@/hooks/useSmartTags";
@@ -14,12 +14,23 @@ import { MiniLabel } from "@/components/ui/MiniLabel";
 import { Divider } from "@/components/ui/Divider";
 import type { FlaggedComment } from "@/lib/types";
 
+function responseAge(createdAt: string): { label: string; urgent: boolean } {
+  const hours = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60);
+  if (hours < 1) return { label: `${Math.round(hours * 60)}m`, urgent: false };
+  if (hours < 24) return { label: `${Math.round(hours)}h`, urgent: hours > 6 };
+  return { label: `${Math.round(hours / 24)}d`, urgent: true };
+}
+
 export function FlaggedView() {
   const { comments, refetch: refetchComments } = useComments();
   const { enabledTags, tagLabel, tagColors, tagPriority } = useSmartTags();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [done, setDone] = useState<FlaggedComment[]>([]);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [regenerating, setRegenerating] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const flagged: FlaggedComment[] = comments
     .filter((c) => {
@@ -60,25 +71,68 @@ export function FlaggedView() {
   const updateDraft = (id: string, val: string) =>
     setDrafts((p) => ({ ...p, [id]: val }));
 
-  const approve = async (c: FlaggedComment) => {
+  const approve = useCallback(async (c: FlaggedComment) => {
     const draftText = getDraft(c);
+    // Copy to clipboard
+    try { await navigator.clipboard.writeText(draftText); } catch {}
+    // Open comment link in new tab
+    if (c.post_url) window.open(c.post_url, "_blank");
+    // Mark as approved in DB
     if (c.replyId) {
       await getSupabase()
         .from("replies")
         .update({ draft_text: draftText, reply_text: draftText, approved: true } as never)
         .eq("id", c.replyId);
     }
+    setCopied(c.id);
+    setTimeout(() => setCopied(null), 2000);
     setDone((p) => [...p, c]);
     refetchComments();
-  };
+  }, [drafts, refetchComments]);
 
-  const dismiss = async (c: FlaggedComment) => {
+  const dismiss = useCallback(async (c: FlaggedComment) => {
     await getSupabase()
       .from("comments")
       .update({ status: "hidden" } as never)
       .eq("id", c.id);
     refetchComments();
-  };
+  }, [refetchComments]);
+
+  const regenerate = useCallback(async (c: FlaggedComment) => {
+    setRegenerating((p) => ({ ...p, [c.id]: true }));
+    try {
+      const res = await fetch("/api/generate-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comment: {
+            platform: c.platform,
+            username: c.username,
+            comment_text: c.comment_text,
+            post_title: c.post_title,
+            post_url: c.post_url,
+            comment_external_id: c.comment_external_id,
+            created_at: c.created_at,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.reply_text) {
+        updateDraft(c.id, data.reply_text);
+        // Update in DB too
+        if (c.replyId) {
+          await getSupabase()
+            .from("replies")
+            .update({ draft_text: data.reply_text, reply_text: data.reply_text } as never)
+            .eq("id", c.replyId);
+        }
+      }
+    } catch {
+      // Silently fail — user can try again
+    } finally {
+      setRegenerating((p) => ({ ...p, [c.id]: false }));
+    }
+  }, []);
 
   // Filter and sort by priority
   const active = useMemo(() => {
@@ -99,10 +153,51 @@ export function FlaggedView() {
     return items;
   }, [flagged, done, activeFilters]);
 
+  // Keep selectedIdx in bounds
+  useEffect(() => {
+    if (selectedIdx >= active.length) setSelectedIdx(Math.max(0, active.length - 1));
+  }, [active.length, selectedIdx]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      // Don't intercept when typing in textarea
+      if ((e.target as HTMLElement)?.tagName === "TEXTAREA") return;
+      const c = active[selectedIdx];
+      if (!c) return;
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        approve(c);
+      } else if (e.key === "Escape" || e.key === "d") {
+        e.preventDefault();
+        dismiss(c);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        setSelectedIdx((i) => (i + 1) % active.length);
+      } else if (e.key === "r" && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        regenerate(c);
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [active, selectedIdx, approve, dismiss, regenerate]);
+
   const hasAnyTags = flagged.some((c) => c.smart_tag);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3" ref={containerRef}>
+      {/* Keyboard hint */}
+      {active.length > 0 && (
+        <div className="text-[10px] text-content-faint flex gap-3">
+          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">Enter</kbd> Send</span>
+          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">d</kbd> Dismiss</span>
+          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">Tab</kbd> Next</span>
+          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">r</kbd> Regenerate</span>
+        </div>
+      )}
+
       {/* Tag filter bar */}
       {hasAnyTags && (
         <div className="flex gap-1.5 flex-wrap">
@@ -143,46 +238,63 @@ export function FlaggedView() {
         </Card>
       )}
 
-      {active.map((c) => (
-        <Card key={c.id}>
-          <div className="flex justify-between items-center mb-3.5">
-            <div className="flex gap-1.5 items-center">
-              <span className="text-[13px] font-medium text-content">
-                @{c.username}
+      {active.map((c, idx) => {
+        const age = responseAge(c.created_at);
+        const isSelected = idx === selectedIdx;
+        return (
+          <Card
+            key={c.id}
+            className={isSelected ? "ring-1 ring-content/20" : ""}
+            onClick={() => setSelectedIdx(idx)}
+          >
+            <div className="flex justify-between items-center mb-3.5">
+              <div className="flex gap-1.5 items-center">
+                <span className="text-[13px] font-medium text-content">
+                  @{c.username}
+                </span>
+                <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
+                {c.smart_tag && (
+                  <SmartTagBadge tagKey={c.smart_tag} />
+                )}
+                <Tag type="flagged">Inbox</Tag>
+              </div>
+              <span className={`text-[11px] ${age.urgent ? "text-red-500 font-medium" : "text-content-faint"}`}>
+                {age.label} ago
               </span>
-              <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
-              {c.smart_tag && (
-                <SmartTagBadge tagKey={c.smart_tag} />
-              )}
-              <Tag type="flagged">Inbox</Tag>
             </div>
-            <span className="text-[11px] text-content-faint">
-              {timeAgo(c.created_at)}
-            </span>
-          </div>
 
-          <p className="mb-5 text-sm text-content leading-[1.65]">
-            {c.comment_text}
-          </p>
+            <p className="mb-5 text-sm text-content leading-[1.65]">
+              {c.comment_text}
+            </p>
 
-          <div className="mb-4">
-            <MiniLabel>Draft reply</MiniLabel>
-            <textarea
-              value={getDraft(c)}
-              onChange={(e) => updateDraft(c.id, e.target.value)}
-              rows={3}
-              className="mt-2 w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content"
-            />
-          </div>
+            <div className="mb-4">
+              <MiniLabel>Draft reply</MiniLabel>
+              <textarea
+                value={getDraft(c)}
+                onChange={(e) => updateDraft(c.id, e.target.value)}
+                rows={3}
+                className="mt-2 w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content"
+              />
+            </div>
 
-          <div className="flex gap-2">
-            <Btn onClick={() => approve(c)}>Send reply</Btn>
-            <Btn variant="secondary" onClick={() => dismiss(c)}>
-              Dismiss
-            </Btn>
-          </div>
-        </Card>
-      ))}
+            <div className="flex gap-2 items-center">
+              <Btn onClick={() => approve(c)}>
+                {copied === c.id ? "Copied!" : "Copy & open"}
+              </Btn>
+              <Btn
+                variant="secondary"
+                onClick={() => regenerate(c)}
+                disabled={regenerating[c.id]}
+              >
+                {regenerating[c.id] ? "Regenerating..." : "Regenerate"}
+              </Btn>
+              <Btn variant="secondary" onClick={() => dismiss(c)}>
+                Dismiss
+              </Btn>
+            </div>
+          </Card>
+        );
+      })}
 
       {done.length > 0 && (
         <Card>
@@ -197,7 +309,7 @@ export function FlaggedView() {
                     </span>
                     <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
                   </div>
-                  <Tag type="replied">Sent</Tag>
+                  <Tag type="replied">Copied</Tag>
                 </div>
                 {i < done.length - 1 && <Divider />}
               </div>

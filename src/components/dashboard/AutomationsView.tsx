@@ -140,8 +140,8 @@ export function AutomationsView() {
 
         {rules.length === 0 && !showForm && (
           <p className="text-xs text-content-faint py-6 text-center">
-            No automation rules yet. Create your first rule to auto-reply or
-            flag comments matching specific keywords or smart tags.
+            No automation rules yet. Create your first rule to suggest replies
+            for comments matching specific keywords or smart tags.
           </p>
         )}
 
@@ -177,9 +177,7 @@ export function AutomationsView() {
                     <Tag type={rule.action_type === "fixed" ? "replied" : "pending"}>
                       {rule.action_type === "fixed" ? "Fixed" : "AI"}
                     </Tag>
-                    {rule.auto_send && (
-                      <Tag type="replied">Auto-send</Tag>
-                    )}
+                    {/* auto_send hidden — all rules are suggestion-only */}
                     {rule.platform && (
                       <Tag type={rule.platform}>
                         {P_LABEL[rule.platform] || rule.platform}
@@ -422,26 +420,6 @@ export function AutomationsView() {
                 />
               </div>
             )}
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setForm({ ...form, auto_send: !form.auto_send })}
-                className={`w-8 h-[18px] rounded-full relative cursor-pointer transition-colors ${
-                  form.auto_send ? "bg-content" : "bg-border"
-                }`}
-              >
-                <span
-                  className={`block w-3.5 h-3.5 rounded-full bg-white absolute top-[2px] transition-transform ${
-                    form.auto_send
-                      ? "translate-x-[16px]"
-                      : "translate-x-[2px]"
-                  }`}
-                />
-              </button>
-              <span className="text-xs text-content-sub">
-                Auto-send (skip review)
-              </span>
-            </div>
 
             <div className="flex gap-2 mt-1">
               <Btn onClick={handleSave} disabled={!canSave}>

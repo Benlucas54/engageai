@@ -390,28 +390,28 @@ export function VoiceView() {
       )}
 
       <Card>
-        <MiniLabel>Auto-reply threshold</MiniLabel>
+        <MiniLabel>Suggestion mode</MiniLabel>
         <div className="mt-[18px] flex flex-col gap-2.5">
           {[
             {
               val: "none" as const,
-              label: "Flag all",
-              desc: "Draft replies for you to review & approve",
+              label: "All comments",
+              desc: "Generate a draft suggestion for every comment",
             },
             {
               val: "simple" as const,
-              label: "Simple only",
-              desc: "Compliments, thanks, reactions",
+              label: "Smart suggestions",
+              desc: "Drafts for questions, inquiries, and meaningful comments",
             },
             {
               val: "most" as const,
-              label: "Most comments",
-              desc: "Everything except pricing & service Qs",
+              label: "High-priority only",
+              desc: "Only pricing and service inquiries",
             },
             {
               val: "all" as const,
-              label: "All comments",
-              desc: "Handle everything, flag nothing",
+              label: "Sync only",
+              desc: "Scrape comments but don\u2019t generate suggestions",
             },
           ].map(({ val, label, desc }) => (
             <div

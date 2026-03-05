@@ -57,21 +57,21 @@ const STEPS = [
   { number: "1", title: "Link your platforms", description: "Connect Instagram, Threads, X, LinkedIn, TikTok, and YouTube in one click." },
   { number: "2", title: "Train your voice", description: "Upload docs, paste example replies, or let AI analyze your existing posts." },
   { number: "3", title: "Install the Chrome extension", description: "Scan comments and capture new followers right from your browser." },
-  { number: "4", title: "Set your automation rules", description: "Choose which comments get auto-replied and which get flagged for review." },
-  { number: "5", title: "Watch the agent work", description: "Sit back while on-brand replies, smart triage, and follower actions flow automatically." },
+  { number: "4", title: "Set your rules", description: "Define which comments get AI suggestions and how the drafts should be written." },
+  { number: "5", title: "Review and send", description: "Review AI-drafted suggestions in your inbox, edit if needed, then copy and send with one click." },
 ];
 
 const AUTOMATION_RULES = [
   {
-    name: "Auto-reply to compliments",
+    name: "Draft reply to compliments",
     trigger: 'Tag = "Compliment"',
-    action: "Generate AI reply using brand voice",
+    action: "Draft AI suggestion using brand voice",
     priority: 1,
   },
   {
     name: "Flag complaints for review",
     trigger: 'Tag = "Complaint" OR keyword "refund"',
-    action: "Flag for manual review, add to priority queue",
+    action: "Surface in priority queue for review",
     priority: 2,
   },
 ];
@@ -80,13 +80,13 @@ const FOLLOWER_RULE_MOCK = {
   name: "Welcome new followers",
   platform: "Instagram",
   filters: ["Follower count > 500", "Has bio link", "Not a brand account"],
-  action: "Send welcome DM using brand voice",
+  action: "Draft welcome DM using brand voice",
   rateLimit: "Max 20 per day",
 };
 
 const DASHBOARD_STATS = [
   { label: "Total today", value: "47" },
-  { label: "Auto-handled", value: "31" },
+  { label: "Sent today", value: "31" },
   { label: "Inbox", value: "6" },
 ];
 
@@ -99,10 +99,10 @@ const PLATFORM_BREAKDOWN = [
 ];
 
 const TIERS = [
-  { label: "Manual", tag: "flagged", description: "Every comment is flagged for your review. Full control, zero automation.", fill: 0 },
-  { label: "Simple only", tag: "replied", description: "Auto-reply to compliments and simple comments. Flag everything else.", fill: 33 },
-  { label: "Most comments", tag: "replied", description: "Auto-handle most comments. Only flag complaints and edge cases.", fill: 66 },
-  { label: "Full autopilot", tag: "replied", description: "The agent handles everything. You review the dashboard at your pace.", fill: 100 },
+  { label: "Sync only", tag: "flagged", description: "Comments sync but no AI suggestions are generated. Full manual control.", fill: 0 },
+  { label: "High-priority", tag: "replied", description: "AI drafts suggestions for pricing and service inquiries only.", fill: 33 },
+  { label: "Smart suggestions", tag: "replied", description: "AI drafts suggestions for questions, inquiries, and meaningful comments.", fill: 66 },
+  { label: "All comments", tag: "replied", description: "AI drafts a suggestion for every comment. You review and send.", fill: 100 },
 ];
 
 /* ─── Waitlist form ─────────────────────────────────────── */
@@ -223,8 +223,8 @@ export default function V2LandingPage() {
           className="text-[15px] leading-relaxed text-content-sub max-w-[540px] mx-auto mt-5 animate-fade-up"
           style={{ animationDelay: "0.2s" }}
         >
-          EngageAI monitors six platforms, auto-replies in your brand voice, triages what matters,
-          and nurtures new followers — so you never miss a conversation again.
+          EngageAI monitors six platforms, drafts replies in your brand voice, triages what matters,
+          and helps you welcome new followers — so you never miss a conversation again.
         </p>
         <div className="mt-8 animate-fade-up" style={{ animationDelay: "0.3s" }}>
           <WaitlistForm id="hero-waitlist" />
@@ -243,7 +243,7 @@ export default function V2LandingPage() {
           {[
             { value: "6 platforms", sub: "monitored simultaneously" },
             { value: "5 smart tags", sub: "AI-classified per comment" },
-            { value: "4 automation tiers", sub: "from manual to full auto" },
+            { value: "4 suggestion modes", sub: "from every comment to high-priority" },
           ].map((s) => (
             <div key={s.value}>
               <p className="font-display text-[24px] tracking-[-0.03em] text-content">{s.value}</p>
@@ -458,11 +458,11 @@ export default function V2LandingPage() {
           <div className="animate-fade-up">
             <Eyebrow>AUTOMATION RULES</Eyebrow>
             <h2 className="font-display text-[clamp(1.5rem,3.5vw,2.25rem)] leading-[1.15] tracking-[-0.03em] text-content mt-3">
-              Set the rules. The agent follows them.
+              Set the rules. AI drafts the replies.
             </h2>
             <p className="text-[14px] leading-relaxed text-content-sub mt-4">
               Build rules that trigger on keywords, smart tags, or platform. Choose between
-              templates and AI-generated instructions. Set priority ordering so the most important
+              templates and AI-generated drafts. Set priority ordering so the most important
               rules fire first.
             </p>
             <ul className="mt-5 space-y-2.5">
@@ -548,12 +548,12 @@ export default function V2LandingPage() {
               </h2>
               <p className="text-[14px] leading-relaxed text-content-sub mt-4">
                 Detect new followers automatically, qualify them with smart filters,
-                and trigger welcome DMs or comments — all while respecting rate limits
+                and draft personalized welcome messages for your review — all while respecting rate limits
                 and platform guidelines.
               </p>
               <ul className="mt-5 space-y-2.5">
                 {[
-                  "Auto-DM new followers with a personalized welcome message",
+                  "Draft personalized welcome DMs for new followers",
                   "Smart filters qualify followers by count, bio, and engagement",
                   "AI qualification scores help you focus on high-value connections",
                   "Built-in rate caps keep you safe from platform limits",
@@ -624,7 +624,7 @@ export default function V2LandingPage() {
             and captures follower data with one click — no tab-switching required.
           </p>
           <div className="flex flex-wrap justify-center gap-2 mt-6">
-            {["On-page highlighting", "One-click scanning", "Background sync"].map((f) => (
+            {["On-page highlighting", "One-click scanning", "Background sync", "Inline AI suggestions"].map((f) => (
               <span key={f} className="px-3 py-1 text-[11px] font-medium bg-surface-card border border-border rounded-full text-content-sub">
                 {f}
               </span>
@@ -638,7 +638,7 @@ export default function V2LandingPage() {
         <div className="text-center animate-fade-up">
           <Eyebrow>AUTOMATION LEVELS</Eyebrow>
           <h2 className="font-display text-[clamp(1.5rem,3.5vw,2.25rem)] leading-[1.15] tracking-[-0.03em] text-content mt-3 mb-10">
-            From full manual to full autopilot
+            From sync-only to smart suggestions
           </h2>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -657,7 +657,7 @@ export default function V2LandingPage() {
                     />
                   </div>
                   <p className="text-[10px] text-content-faint mt-1.5 text-right">
-                    {t.fill}% automated
+                    {t.fill}% AI coverage
                   </p>
                 </div>
               </Card>

@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { useComments } from "@/hooks/useComments";
 import { useFollowerStats } from "@/hooks/useFollowerStats";
 import { useSmartTags } from "@/hooks/useSmartTags";
+import { useInboxStats } from "@/hooks/useInboxStats";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
@@ -18,26 +19,22 @@ export function OverviewView() {
   const { comments } = useComments();
   const { stats: followerStats } = useFollowerStats();
   const { enabledTags, tagColors, tagLabel, tagPriority } = useSmartTags();
+  const { pendingSuggestions, sentToday, responseRate7d, avgResponseTimeHours } = useInboxStats();
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayISO = todayStart.toISOString();
   const todayComments = comments.filter((c) => c.synced_at >= todayISO || c.created_at >= todayISO);
 
-  const replied = todayComments.filter((c) => c.replies?.some((r) => r.auto_sent && r.sent_at)).length;
-  const flagged = comments.filter((c) => {
-    if (c.status !== "flagged" && c.status !== "pending") return false;
-    if (c.replies?.some((r) => r.sent_at)) return false;
-    if (c.replies?.some((r) => r.approved)) return false;
-    return true;
-  }).length;
-
   const platforms = (["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const).map((p) => {
     const total = todayComments.filter((c) => c.platform === p).length;
-    const auto = todayComments.filter(
-      (c) => c.platform === p && c.replies?.some((r) => r.auto_sent && r.sent_at)
+    const replied = todayComments.filter(
+      (c) => c.platform === p && c.replies?.some((r) => r.sent_at)
     ).length;
-    return { p, total, auto };
+    const pending = todayComments.filter(
+      (c) => c.platform === p && (c.status === "flagged" || c.status === "pending") && !c.replies?.some((r) => r.sent_at)
+    ).length;
+    return { p, total, replied, pending };
   });
 
   // Tag distribution for today's comments
@@ -74,24 +71,40 @@ export function OverviewView() {
       .slice(0, 5);
   }, [comments]);
 
+  // Recent replies: last 5 user-sent replies
+  const recentReplies = useMemo(() => {
+    return comments
+      .filter((c) => c.replies?.some((r) => r.sent_at))
+      .sort((a, b) => {
+        const aTime = a.replies?.find((r) => r.sent_at)?.sent_at || "";
+        const bTime = b.replies?.find((r) => r.sent_at)?.sent_at || "";
+        return bTime.localeCompare(aTime);
+      })
+      .slice(0, 5);
+  }, [comments]);
+
   return (
     <div className="flex flex-col gap-3.5">
 
-      <div className="grid grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-4 gap-2.5">
         {[
-          { label: "Total today", val: todayComments.length, tag: null },
-          { label: "Auto-handled", val: replied, tag: "replied" as const },
-          { label: "Inbox", val: flagged, tag: "flagged" as const },
-        ].map(({ label, val, tag }) => (
+          { label: "Pending suggestions", val: pendingSuggestions, tag: "flagged" as const },
+          { label: "Sent today", val: sentToday, tag: "replied" as const },
+          { label: "Response rate", val: `${responseRate7d}%`, tag: null, sub: "7-day rolling" },
+          { label: "Avg response time", val: avgResponseTimeHours > 0 ? `${avgResponseTimeHours}h` : "\u2014", tag: null, sub: "hours" },
+        ].map(({ label, val, tag, sub }) => (
           <Card key={label}>
             <MiniLabel>{label}</MiniLabel>
-            <div className="my-2.5 text-4xl font-light tracking-[-0.03em] text-content font-display leading-none">
+            <div className="my-2.5 text-3xl font-light tracking-[-0.03em] text-content font-display leading-none">
               {val}
             </div>
             {tag && (
               <Tag type={tag}>
-                {tag === "replied" ? "Auto-replied" : "Needs reply"}
+                {tag === "replied" ? "User-sent" : "Needs reply"}
               </Tag>
+            )}
+            {sub && (
+              <span className="text-[11px] text-content-faint">{sub}</span>
             )}
           </Card>
         ))}
@@ -101,19 +114,22 @@ export function OverviewView() {
       <Card>
         <MiniLabel>Platform breakdown</MiniLabel>
         <div className="mt-5 flex flex-col gap-[18px]">
-          {platforms.map(({ p, total, auto }) => (
+          {platforms.map(({ p, total, replied, pending }) => (
             <div key={p}>
               <div className="flex justify-between items-center mb-2">
                 <Tag type={p}>{P_LABEL[p]}</Tag>
-                <span className="text-xs text-content-faint">
-                  {auto} / {total} replied
-                </span>
+                <div className="flex gap-3 text-xs text-content-faint">
+                  <span>{replied} / {total} replied</span>
+                  {pending > 0 && (
+                    <span className="text-tag-flagged-text">{pending} pending</span>
+                  )}
+                </div>
               </div>
               <div className="h-[3px] bg-border-light rounded-[3px]">
                 <div
                   className="h-full bg-content rounded-[3px]"
                   style={{
-                    width: total > 0 ? `${(auto / total) * 100}%` : "0%",
+                    width: total > 0 ? `${(replied / total) * 100}%` : "0%",
                   }}
                 />
               </div>
@@ -259,17 +275,17 @@ export function OverviewView() {
       )}
 
       {/* Inbox nudge */}
-      {flagged > 0 && (
+      {pendingSuggestions > 0 && (
         <Link href="/inbox" className="no-underline">
           <Card className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
               <Tag type="flagged">Action needed</Tag>
               <div>
                 <div className="text-[13px] text-content font-medium">
-                  {flagged} comments waiting for your reply
+                  {pendingSuggestions} comments waiting for your reply
                 </div>
                 <div className="text-xs text-content-faint mt-0.5">
-                  Unengaged comments needing your reply
+                  AI suggestions ready for review
                 </div>
               </div>
             </div>
@@ -280,11 +296,16 @@ export function OverviewView() {
         </Link>
       )}
 
-      {/* Recent activity */}
+      {/* Recent replies */}
       <Card>
-        <MiniLabel>Recent activity</MiniLabel>
+        <MiniLabel>Recent replies</MiniLabel>
         <div className="mt-4">
-          {comments.slice(0, 4).map((c, i) => (
+          {recentReplies.length === 0 && (
+            <p className="text-[13px] text-content-faint text-center py-6">
+              No replies sent yet
+            </p>
+          )}
+          {recentReplies.map((c, i) => (
             <div key={c.id}>
               <div className="flex justify-between items-start py-3.5 gap-4">
                 <div className="flex-1 min-w-0">
@@ -298,17 +319,17 @@ export function OverviewView() {
                     )}
                   </div>
                   <p className="m-0 text-[13px] text-content-sub leading-[1.6] whitespace-nowrap overflow-hidden text-ellipsis">
-                    {c.comment_text}
+                    {c.replies?.find((r) => r.sent_at)?.reply_text || c.comment_text}
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <Tag type={c.status}>{c.status === "flagged" ? "inbox" : c.status}</Tag>
+                  <Tag type="replied">Sent</Tag>
                   <span className="text-[11px] text-content-faint">
-                    {timeAgo(c.created_at)}
+                    {timeAgo(c.replies?.find((r) => r.sent_at)?.sent_at || c.created_at)}
                   </span>
                 </div>
               </div>
-              {i < 3 && <Divider />}
+              {i < recentReplies.length - 1 && <Divider />}
             </div>
           ))}
         </div>

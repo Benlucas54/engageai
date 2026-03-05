@@ -23,6 +23,28 @@ export async function generateReply(
   return reply_text;
 }
 
+export async function generateEngagementComment(payload: {
+  platform: string;
+  postAuthor: string;
+  postCaption: string;
+  postUrl: string;
+  existingComments: { username: string; text: string }[];
+}): Promise<string> {
+  const res = await fetch(`${API_URL}/api/generate-engagement`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `API error ${res.status}`);
+  }
+
+  const { comment_text } = await res.json();
+  return comment_text;
+}
+
 /**
  * Harvest approved+sent replies where the user edited the draft or manually approved.
  * Promotes them into voice_examples with source='learned'.

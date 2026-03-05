@@ -1,4 +1,7 @@
 import type { ScrapedComment, CommentMark, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
+import { startReplyDetector } from "../lib/reply-detector";
+import { showInlineWidget, showEngagementWidget } from "../lib/inline-widget";
+import { initSidePanel, updatePanelData } from "./shared/side-panel";
 
 function scrape(ownerUsername: string): ScrapedComment[] {
   const url = window.location.href;
@@ -6,7 +9,6 @@ function scrape(ownerUsername: string): ScrapedComment[] {
 
   const postUrl = url.split("?")[0];
 
-  // Find tweets
   const tweetEls = document.querySelectorAll(
     'article[data-testid="tweet"]'
   );
@@ -14,7 +16,6 @@ function scrape(ownerUsername: string): ScrapedComment[] {
   const comments: ScrapedComment[] = [];
 
   for (const el of tweetEls) {
-    // Extract username
     const userNameEl = el.querySelector(
       'div[data-testid="User-Name"] a[href*="/"]'
     );
@@ -24,16 +25,12 @@ function scrape(ownerUsername: string): ScrapedComment[] {
         ?.replace("/", "")
         ?.split("/")[0] || "";
 
-    // Extract tweet text
     const textEl = el.querySelector('div[data-testid="tweetText"]');
     const text = textEl?.textContent?.trim() || "";
 
     if (!username || !text) continue;
-
-    // Skip owner's own comments
     if (ownerUsername && username.toLowerCase() === ownerUsername.toLowerCase()) continue;
 
-    // Extract timestamp from <time datetime="...">
     const timeEl = el.querySelector("time[datetime]");
     const created_at = timeEl?.getAttribute("datetime") || new Date().toISOString();
 
@@ -49,10 +46,6 @@ function scrape(ownerUsername: string): ScrapedComment[] {
   }
 
   return comments;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 // --- Comment indicators ---
@@ -96,6 +89,19 @@ function injectMarkers(marks: CommentMark[]): void {
   }
 }
 
+// --- Inline reply helper ---
+chrome.storage.local.get("inline_helper_enabled", ({ inline_helper_enabled }) => {
+  if (inline_helper_enabled === false) return;
+  startReplyDetector(
+    "x",
+    (ctx) => showInlineWidget(ctx),
+    (ctx) => showEngagementWidget(ctx)
+  );
+});
+
+// --- Side panel ---
+initSidePanel();
+
 // Clear markers on SPA navigation
 let _lastUrl = location.href;
 new MutationObserver(() => {
@@ -116,11 +122,6 @@ chrome.runtime.onMessage.addListener(
       sendResponse({ success: true, comments });
     }
 
-    if (message.action === "POST_REPLY") {
-      // X posting is disabled — monitor only
-      sendResponse({ success: false, error: "X posting disabled" });
-    }
-
     if (message.action === "MARK_COMMENTS") {
       injectMarkers(message.marks || []);
       sendResponse({ success: true });
@@ -128,6 +129,13 @@ chrome.runtime.onMessage.addListener(
 
     if (message.action === "CLEAR_MARKS") {
       clearMarkers();
+      sendResponse({ success: true });
+    }
+
+    if (message.action === "UPDATE_SIDE_PANEL") {
+      if (message.sidePanelItems) {
+        updatePanelData(message.sidePanelItems);
+      }
       sendResponse({ success: true });
     }
   }

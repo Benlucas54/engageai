@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServerClient } from "@/lib/supabase-server";
+import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,15 @@ export async function POST(req: NextRequest) {
 
     if (comments.length > 20) {
       return NextResponse.json({ error: "Max 20 comments per call" }, { status: 400 });
+    }
+
+    // Usage gating — count each comment in the batch
+    const userId = user_id || await getUserFromRequest(req);
+    if (userId) {
+      const gate = await withUsageGating(userId, "comment_tags", comments.length);
+      if (!gate.allowed) {
+        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
+      }
     }
 
     const supabase = createServerClient();

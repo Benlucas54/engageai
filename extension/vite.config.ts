@@ -36,11 +36,12 @@ const sharedDefine = {
   "process.emit": "undefined",
 };
 
-// Two-pass build: service worker (single file) + everything else (ES modules)
+// Three-pass build:
+//   1. Default: popup + sidepanel (HTML entries, ES modules, can share chunks)
+//   2. content-scripts: each content script as a self-contained bundle (no shared chunks)
+//   3. service-worker: single self-contained file
 export default defineConfig(({ mode }) => {
-  const isServiceWorker = mode === "service-worker";
-
-  if (isServiceWorker) {
+  if (mode === "service-worker") {
     return {
       plugins: [wsShimPlugin()],
       define: sharedDefine,
@@ -62,6 +63,35 @@ export default defineConfig(({ mode }) => {
     };
   }
 
+  // Content scripts must be self-contained (no shared chunks) because Chrome
+  // loads them as classic scripts, not ES modules.
+  // Each is built individually in lib mode with inlineDynamicImports to guarantee
+  // a single output file with all dependencies inlined.
+  if (mode.startsWith("content-")) {
+    const scriptName = mode; // e.g. "content-instagram"
+    const fileName = scriptName.replace("content-", ""); // e.g. "instagram"
+    return {
+      plugins: [wsShimPlugin()],
+      define: sharedDefine,
+      build: {
+        outDir: "dist",
+        emptyOutDir: false,
+        lib: {
+          entry: resolve(__dirname, `src/content-scripts/${fileName}.ts`),
+          name: scriptName,
+          formats: ["es"],
+          fileName: () => `${scriptName}.js`,
+        },
+        rollupOptions: {
+          output: {
+            inlineDynamicImports: true,
+          },
+        },
+      },
+    };
+  }
+
+  // Default: popup + sidepanel only (can safely share chunks via <script type="module">)
   return {
     plugins: [react(), wsShimPlugin()],
     define: sharedDefine,
@@ -71,11 +101,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           popup: resolve(__dirname, "src/popup/index.html"),
-          "content-instagram": resolve(__dirname, "src/content-scripts/instagram.ts"),
-          "content-threads": resolve(__dirname, "src/content-scripts/threads.ts"),
-          "content-x": resolve(__dirname, "src/content-scripts/x.ts"),
-          "content-linkedin": resolve(__dirname, "src/content-scripts/linkedin.ts"),
-          "content-tiktok": resolve(__dirname, "src/content-scripts/tiktok.ts"),
+          sidepanel: resolve(__dirname, "src/popup/sidepanel.html"),
         },
         output: {
           entryFileNames: "[name].js",

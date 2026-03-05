@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -51,6 +52,15 @@ export async function POST(req: NextRequest) {
         { error: "Missing field or text" },
         { status: 400 }
       );
+    }
+
+    // Usage gating
+    const userId = await getUserFromRequest(req);
+    if (userId) {
+      const gate = await withUsageGating(userId, "voice_enhancements");
+      if (!gate.allowed) {
+        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
+      }
     }
 
     const systemPrompt = FIELD_PROMPTS[field];

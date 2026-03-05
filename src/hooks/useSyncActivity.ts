@@ -7,17 +7,17 @@ export interface ActivityItem {
   id: string;
   username: string;
   platform: string;
-  status: "scanning" | "liked" | "replied" | "flagged";
+  status: "scanning" | "suggested" | "flagged";
   text: string;
   ts: string;
 }
 
-export function useAgentActivity() {
+export function useSyncActivity() {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [isRunning, setIsRunning] = useState(false);
 
   const poll = useCallback(async () => {
-    // Check if agent is running
+    // Check if sync is running
     const statusRes = await fetch("/api/agent-status");
     if (!statusRes.ok) return;
     const run = await statusRes.json();
@@ -36,13 +36,11 @@ export function useAgentActivity() {
     const runComments = comments.filter((c) => c.synced_at >= since);
 
     const activity: ActivityItem[] = runComments.map((c) => {
-      const hasReply = c.replies?.some((r) => r.sent_at);
-      const isApproved = c.replies?.some((r) => r.approved);
+      const hasDraft = c.replies?.some((r) => r.draft_text);
       const isFlagged = c.status === "flagged";
 
       let status: ActivityItem["status"];
-      if (hasReply) status = "replied";
-      else if (isApproved) status = "liked";
+      if (hasDraft) status = "suggested";
       else if (isFlagged) status = "flagged";
       else status = "scanning";
 

@@ -20,12 +20,13 @@ export const config = {
   matcher: [
     /*
      * Match all routes except:
-     * - /login
-     * - /auth/callback
-     * - /api/telegram (webhook must remain public)
+     * - / (landing page)
+     * - /v2, /beta, /pricing (marketing pages)
+     * - /login, /auth/callback
+     * - /api/* (API routes handle their own auth)
      * - /_next (Next.js internals)
      * - Static files (favicon, images, etc.)
      */
-    "/((?!$|v2|login|auth/callback|api/telegram|api/generate-reply|api/tag-comments|api/smart-tags|api/summarize-profiles|api/enhance-voice|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!$|v2|beta|login|auth/callback|pricing|api/|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
