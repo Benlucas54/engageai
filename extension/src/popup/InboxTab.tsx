@@ -42,6 +42,8 @@ export default function InboxTab() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState<ScanResult[]>([]);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const hasCacheRef = useRef(false);
 
@@ -116,6 +118,39 @@ export default function InboxTab() {
         if (item) setResults((prev) => [{ ...item, comment: { ...item.comment, status: "flagged" } }, ...prev]);
       }
     });
+  };
+
+  const handleGenerate = async (commentExternalId: string) => {
+    setGeneratingId(commentExternalId);
+    setGenerateError(null);
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "GENERATE_SUGGESTION_FOR_COMMENT",
+        commentExternalId,
+      });
+      if (response?.success && response.draftText) {
+        setResults((prev) =>
+          prev.map((r) =>
+            r.comment.comment_external_id === commentExternalId
+              ? { ...r, reply: { ...r.reply, draft_text: response.draftText } as any }
+              : r
+          )
+        );
+      } else {
+        const msg = response?.error || "Generation failed";
+        setGenerateError(msg);
+        setGeneratingId("failed:" + commentExternalId);
+        setTimeout(() => { setGeneratingId(null); setGenerateError(null); }, 4000);
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Generation failed";
+      setGenerateError(msg);
+      setGeneratingId("failed:" + commentExternalId);
+      setTimeout(() => { setGeneratingId(null); setGenerateError(null); }, 4000);
+      return;
+    }
+    setGeneratingId(null);
   };
 
   return (
@@ -335,7 +370,7 @@ export default function InboxTab() {
               </div>
             ) : !isSent && (
               <div style={{ display: "flex", gap: "6px" }}>
-                {hasSuggestion && (
+                {hasSuggestion ? (
                   <button
                     onClick={() => handleCopy(result.comment.id, result.reply!.draft_text || result.reply!.reply_text)}
                     style={{
@@ -352,6 +387,36 @@ export default function InboxTab() {
                   >
                     {copiedId === result.comment.id ? "Copied!" : "Copy reply"}
                   </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleGenerate(result.comment.comment_external_id)}
+                      disabled={generatingId === result.comment.comment_external_id}
+                      style={{
+                        padding: "5px 14px",
+                        borderRadius: "6px",
+                        border: "none",
+                        backgroundColor: "#1c1917",
+                        color: "#fff",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        cursor: generatingId === result.comment.comment_external_id ? "not-allowed" : "pointer",
+                        opacity: generatingId === result.comment.comment_external_id ? 0.6 : 1,
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {generatingId === result.comment.comment_external_id
+                        ? "Generating..."
+                        : generatingId === "failed:" + result.comment.comment_external_id
+                          ? "Failed"
+                          : "Generate"}
+                    </button>
+                    {generatingId === "failed:" + result.comment.comment_external_id && generateError && (
+                      <span style={{ color: "#c53030", fontSize: "10px" }}>
+                        {generateError}
+                      </span>
+                    )}
+                  </>
                 )}
                 {result.comment.post_url && (
                   <button

@@ -12,7 +12,8 @@
     "https://threads.com/*",
     "https://x.com/*",
     "https://www.linkedin.com/*",
-    "https://www.tiktok.com/*"
+    "https://www.tiktok.com/*",
+    "https://engageai-coral.vercel.app/*"
   ],
   "action": {
     "default_icon": {

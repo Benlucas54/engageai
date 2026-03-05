@@ -8,15 +8,28 @@ export async function generateReply(
   profile?: CommenterProfile | null,
   automationInstruction?: string
 ): Promise<string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    headers["Authorization"] = `Bearer ${session.access_token}`;
+  }
+
   const res = await fetch(`${API_URL}/api/generate-reply`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ comment, profile, automationInstruction }),
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: "Unknown error" }));
-    throw new Error(err.error || `API error ${res.status}`);
+    const text = await res.text();
+    let msg = `API ${res.status}`;
+    try {
+      const json = JSON.parse(text);
+      if (json.error) msg = json.error;
+    } catch {
+      if (text.length > 0) msg += `: ${text.slice(0, 120)}`;
+    }
+    throw new Error(msg);
   }
 
   const { reply_text } = await res.json();

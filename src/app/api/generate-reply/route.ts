@@ -262,8 +262,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply_text: replyText });
   } catch (err) {
     console.error("[generate-reply] Error:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { error: "Failed to generate reply" },
+      { error: `Failed to generate reply: ${message}` },
       { status: 500 }
     );
   }
