@@ -1,12 +1,26 @@
 import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabase";
 import InboxTab from "./InboxTab";
 import SettingsTab from "./SettingsTab";
+import LoginScreen from "./LoginScreen";
 
 type TabId = "inbox" | "settings";
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("inbox");
   const [activeTabKey, setActiveTabKey] = useState(0);
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
+  // Check session on mount + listen for auth changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthed(!!session);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Refresh child tabs when user switches browser tabs or navigates
   useEffect(() => {
@@ -32,6 +46,26 @@ export default function App() {
     { id: "settings", label: "Settings" },
   ];
 
+  // Loading state while checking session
+  if (authed === null) {
+    return (
+      <div
+        style={{
+          backgroundColor: "#f7f6f3",
+          minHeight: "500px",
+          fontFamily: "'DM Sans', sans-serif",
+          color: "#78746e",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "12px",
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -41,56 +75,65 @@ export default function App() {
         color: "#1c1917",
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          backgroundColor: "#ffffff",
-          borderBottom: "1px solid #e9e6e0",
-          padding: "12px 16px",
-        }}
-      >
-        <div style={{ fontSize: "15px", fontWeight: 600, color: "#1c1917", letterSpacing: "0.02em" }}>
-          EngageAI
-        </div>
-        <div style={{ fontSize: "11px", color: "#d4d0ca" }}>
-          AI-powered reply assistant
-        </div>
-      </div>
-
-      {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          borderBottom: "1px solid #e9e6e0",
-          backgroundColor: "#ffffff",
-        }}
-      >
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+      {!authed ? (
+        <LoginScreen onLogin={() => {
+          setAuthed(true);
+          chrome.runtime.sendMessage({ action: "AUTH_SESSION_CHANGED" });
+        }} />
+      ) : (
+        <>
+          {/* Header */}
+          <div
             style={{
-              flex: 1,
-              padding: "10px",
-              fontSize: "12px",
-              fontWeight: tab === t.id ? 600 : 400,
-              color: tab === t.id ? "#1c1917" : "#78746e",
-              backgroundColor: "transparent",
-              border: "none",
-              borderBottom:
-                tab === t.id ? "2px solid #1c1917" : "2px solid transparent",
-              cursor: "pointer",
-              fontFamily: "inherit",
+              backgroundColor: "#ffffff",
+              borderBottom: "1px solid #e9e6e0",
+              padding: "12px 16px",
             }}
           >
-            {t.label}
-          </button>
-        ))}
-      </div>
+            <div style={{ fontSize: "15px", fontWeight: 600, color: "#1c1917", letterSpacing: "0.02em" }}>
+              EngageAI
+            </div>
+            <div style={{ fontSize: "11px", color: "#d4d0ca" }}>
+              AI-powered reply assistant
+            </div>
+          </div>
 
-      {/* Tab content */}
-      <div style={{ display: tab === "inbox" ? "block" : "none" }}><InboxTab key={activeTabKey} /></div>
-      <div style={{ display: tab === "settings" ? "block" : "none" }}><SettingsTab /></div>
+          {/* Tab bar */}
+          <div
+            style={{
+              display: "flex",
+              borderBottom: "1px solid #e9e6e0",
+              backgroundColor: "#ffffff",
+            }}
+          >
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  flex: 1,
+                  padding: "10px",
+                  fontSize: "12px",
+                  fontWeight: tab === t.id ? 600 : 400,
+                  color: tab === t.id ? "#1c1917" : "#78746e",
+                  backgroundColor: "transparent",
+                  border: "none",
+                  borderBottom:
+                    tab === t.id ? "2px solid #1c1917" : "2px solid transparent",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div style={{ display: tab === "inbox" ? "block" : "none" }}><InboxTab key={activeTabKey} /></div>
+          <div style={{ display: tab === "settings" ? "block" : "none" }}><SettingsTab /></div>
+        </>
+      )}
     </div>
   );
 }

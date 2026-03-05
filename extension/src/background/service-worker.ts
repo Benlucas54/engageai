@@ -5,7 +5,6 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })
   .catch((err: unknown) => console.error("[EngageAI] setPanelBehavior failed:", err));
 import {
   generateReply,
-  generateEngagementComment,
   harvestLearnedExamples,
   tagComments,
 } from "../lib/claude";
@@ -23,7 +22,6 @@ import type {
   ScrapedComment,
   Comment,
   ScanResult,
-  CommentMark,
   SmartTag,
   SidePanelItem,
 } from "../lib/types";
@@ -486,6 +484,38 @@ function scheduleScanAlarms(): void {
   });
 }
 
+// --- Session restore ---
+// When the service worker starts (or restarts after Chrome kills it),
+// restore the Supabase auth session from chrome.storage.local so that
+// RLS-protected queries and API calls work immediately.
+async function restoreSession(): Promise<void> {
+  try {
+    const items = await chrome.storage.local.get();
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+        const stored = typeof value === "string" ? JSON.parse(value) : value;
+        if (stored?.access_token && stored?.refresh_token) {
+          const { error } = await supabase.auth.setSession({
+            access_token: stored.access_token,
+            refresh_token: stored.refresh_token,
+          });
+          if (error) {
+            console.warn("[EngageAI] Session restore failed:", error.message);
+          } else {
+            console.log("[EngageAI] Session restored from storage");
+          }
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn("[EngageAI] Session restore error:", err);
+  }
+}
+
+// Restore session eagerly on service worker start
+restoreSession();
+
 // --- Event listeners ---
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -496,7 +526,6 @@ chrome.runtime.onInstalled.addListener(() => {
     },
     side_panel_enabled: true,
     side_panel_collapsed: true,
-    inline_helper_enabled: true,
   });
   scheduleScanAlarms();
   // Cache owner usernames for engagement detection
@@ -529,6 +558,30 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.action === "AUTH_SESSION_CHANGED") {
+    (async () => {
+      try {
+        const items = await chrome.storage.local.get();
+        for (const [key, value] of Object.entries(items)) {
+          if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+            const session = typeof value === "string" ? JSON.parse(value) : value;
+            if (session?.access_token && session?.refresh_token) {
+              await supabase.auth.setSession({
+                access_token: session.access_token,
+                refresh_token: session.refresh_token,
+              });
+            }
+            break;
+          }
+        }
+      } catch (err) {
+        console.error("[EngageAI] Session sync failed:", err);
+      }
+      sendResponse({ success: true });
+    })();
+    return true;
+  }
+
   if (message.action === "SCRAPE_CURRENT") {
     chrome.tabs.query({ active: true, lastFocusedWindow: true }, async (tabs) => {
       const tab = tabs[0];
@@ -568,27 +621,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
         console.log(`[EngageAI] Manual scan: ${newResults.length} new, ${allResults.length} total`);
         sendResponse({ success: true, results: allResults, platform });
-
-        // Send MARK_COMMENTS to the content script for unengaged comments
-        const marks: CommentMark[] = allResults
-          .filter((r) => {
-            const s = r.comment.status;
-            if (s !== "pending" && s !== "flagged") return false;
-            if (r.reply?.sent_at) return false;
-            return true;
-          })
-          .map((r) => ({
-            comment_external_id: r.comment.comment_external_id,
-            username: r.comment.username,
-            comment_text_prefix: r.comment.comment_text.slice(0, 20),
-            status: r.comment.status as "pending" | "flagged",
-            draftText: r.reply?.draft_text || r.reply?.reply_text || undefined,
-            postUrl: r.comment.post_url,
-            commentId: r.comment.id,
-          }));
-        if (marks.length > 0) {
-          chrome.tabs.sendMessage(tab.id!, { action: "MARK_COMMENTS", marks }).catch(() => {});
-        }
       } catch (err) {
         sendResponse({
           success: false,
@@ -707,15 +739,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({ success: false, error: "No comment external ID" });
           return;
         }
+        // Ensure session is restored before querying
+        await restoreSession();
         // Find the comment in Supabase
-        const { data: comment } = await supabase
+        const { data: comment, error: commentErr } = await supabase
           .from("comments")
           .select("*")
           .eq("comment_external_id", commentExternalId)
           .limit(1)
           .single();
         if (!comment) {
-          sendResponse({ success: false, error: "Comment not found" });
+          const errMsg = commentErr ? `DB error: ${commentErr.message}` : "Comment not found in database";
+          console.error(`[EngageAI] GENERATE_SUGGESTION failed: ${errMsg} (externalId: ${commentExternalId})`);
+          sendResponse({ success: false, error: errMsg });
           return;
         }
         // Check if reply already exists (unless force regenerate)
@@ -762,118 +798,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.action === "GENERATE_SUGGESTION_INLINE") {
-    (async () => {
-      try {
-        const { username, commentText, commentExternalId, platform, postUrl, postTitle, forceRegenerate } = message;
-        if (!username || !commentText) {
-          sendResponse({ success: false, error: "Missing username or commentText" });
-          return;
-        }
-
-        // Check if comment already exists in DB
-        let commentId: string;
-        const { data: existingComment } = await supabase
-          .from("comments")
-          .select("id")
-          .eq("comment_external_id", commentExternalId)
-          .limit(1)
-          .single();
-
-        if (existingComment) {
-          commentId = existingComment.id;
-        } else {
-          // Insert it
-          const { data: inserted, error } = await supabase
-            .from("comments")
-            .insert({
-              platform,
-              username,
-              comment_text: commentText,
-              post_title: postTitle || "Post",
-              post_url: postUrl || "",
-              comment_external_id: commentExternalId,
-              status: "flagged",
-              synced_at: new Date().toISOString(),
-            })
-            .select()
-            .single();
-          if (error || !inserted) {
-            sendResponse({ success: false, error: "Failed to insert comment" });
-            return;
-          }
-          commentId = inserted.id;
-        }
-
-        // Check for existing reply (unless force regenerate)
-        if (!forceRegenerate) {
-          const { data: existingReply } = await supabase
-            .from("replies")
-            .select("draft_text")
-            .eq("comment_id", commentId)
-            .limit(1)
-            .single();
-          if (existingReply?.draft_text) {
-            sendResponse({ success: true, draftText: existingReply.draft_text });
-            return;
-          }
-        }
-
-        // Generate reply
-        const profile = await getCommenterProfile(platform, username);
-        const replyText = await generateReply(
-          { platform, username, comment_text: commentText, post_title: postTitle || "Post", post_url: postUrl || "", comment_external_id: commentExternalId, created_at: new Date().toISOString() },
-          profile
-        );
-
-        // Save
-        if (forceRegenerate) {
-          await supabase
-            .from("replies")
-            .update({ reply_text: replyText, draft_text: replyText })
-            .eq("comment_id", commentId);
-        } else {
-          await supabase
-            .from("replies")
-            .insert({
-              comment_id: commentId,
-              reply_text: replyText,
-              draft_text: replyText,
-              approved: false,
-              auto_sent: false,
-            });
-        }
-
-        sendResponse({ success: true, draftText: replyText });
-      } catch (err) {
-        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
-      }
-    })();
-    return true;
-  }
-
-  if (message.action === "GENERATE_ENGAGEMENT_INLINE") {
-    (async () => {
-      try {
-        const { platform, postAuthor, postCaption, postUrl, existingComments } = message;
-        if (!platform || !postCaption) {
-          sendResponse({ success: false, error: "Missing platform or post caption" });
-          return;
-        }
-
-        const commentText = await generateEngagementComment({
-          platform,
-          postAuthor: postAuthor || "",
-          postCaption,
-          postUrl: postUrl || "",
-          existingComments: existingComments || [],
-        });
-
-        sendResponse({ success: true, draftText: commentText });
-      } catch (err) {
-        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
-      }
-    })();
-    return true;
-  }
 });

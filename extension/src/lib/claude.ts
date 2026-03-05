@@ -3,16 +3,67 @@ import type { ScrapedComment, VoiceSettings, CommenterProfile, SmartTag } from "
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+/**
+ * Ensure the service worker's Supabase client has a valid session.
+ * Service workers can be terminated and restarted by Chrome, which
+ * means the in-memory session may be lost. This restores it from
+ * chrome.storage.local and refreshes the token if needed.
+ */
+async function ensureSession(): Promise<string | null> {
+  // Try in-memory session first
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    return session.access_token;
+  }
+
+  // Restore from chrome.storage.local (service worker may have restarted)
+  const items = await chrome.storage.local.get();
+  for (const [key, value] of Object.entries(items)) {
+    if (key.startsWith("sb-") && key.endsWith("-auth-token")) {
+      try {
+        const stored = typeof value === "string" ? JSON.parse(value) : value;
+        if (stored?.access_token && stored?.refresh_token) {
+          // Restore the full session so Supabase can auto-refresh
+          const { data, error } = await supabase.auth.setSession({
+            access_token: stored.access_token,
+            refresh_token: stored.refresh_token,
+          });
+          if (error) {
+            console.error("[EngageAI] Session restore failed:", error.message);
+            // Still try to use the raw token as a last resort
+            return stored.access_token;
+          }
+          if (data.session?.access_token) {
+            return data.session.access_token;
+          }
+        } else if (stored?.access_token) {
+          return stored.access_token;
+        }
+      } catch (e) {
+        console.error("[EngageAI] Failed to parse stored auth token:", e);
+      }
+      break;
+    }
+  }
+
+  console.error("[EngageAI] No auth token found — user may not be logged in");
+  return null;
+}
+
 export async function generateReply(
   comment: ScrapedComment,
   profile?: CommenterProfile | null,
   automationInstruction?: string
 ): Promise<string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    headers["Authorization"] = `Bearer ${session.access_token}`;
+  const token = await ensureSession();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  } else {
+    throw new Error("Not logged in — please sign in via the extension popup");
   }
+
+  console.log(`[EngageAI] Generating reply for @${comment.username} on ${comment.platform}...`);
 
   const res = await fetch(`${API_URL}/api/generate-reply`, {
     method: "POST",
@@ -29,10 +80,12 @@ export async function generateReply(
     } catch {
       if (text.length > 0) msg += `: ${text.slice(0, 120)}`;
     }
+    console.error(`[EngageAI] generate-reply failed:`, msg);
     throw new Error(msg);
   }
 
   const { reply_text } = await res.json();
+  console.log(`[EngageAI] Reply generated (${reply_text.length} chars)`);
   return reply_text;
 }
 

@@ -34,15 +34,13 @@ function Tag({ label, color }: { label: string; color: string }) {
 export default function SettingsTab() {
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [sidePanelEnabled, setSidePanelEnabled] = useState(true);
-  const [inlineHelperEnabled, setInlineHelperEnabled] = useState(true);
 
   useEffect(() => {
     chrome.storage.local.get(
-      ["settings", "side_panel_enabled", "inline_helper_enabled"],
+      ["settings", "side_panel_enabled"],
       (result) => {
         if (result.settings) setSettings(result.settings);
         if (result.side_panel_enabled !== undefined) setSidePanelEnabled(result.side_panel_enabled);
-        if (result.inline_helper_enabled !== undefined) setInlineHelperEnabled(result.inline_helper_enabled);
       }
     );
   }, []);
@@ -111,18 +109,6 @@ export default function SettingsTab() {
           />
           Side panel assistant
         </label>
-        <label style={checkboxRow}>
-          <input
-            type="checkbox"
-            checked={inlineHelperEnabled}
-            onChange={(e) => {
-              setInlineHelperEnabled(e.target.checked);
-              chrome.storage.local.set({ inline_helper_enabled: e.target.checked });
-            }}
-            style={{ accentColor: "#1c1917" }}
-          />
-          Inline reply suggestions
-        </label>
       </div>
 
       {/* Platform toggles */}
@@ -158,6 +144,29 @@ export default function SettingsTab() {
         }}
       >
         Open Dashboard
+      </button>
+
+      {/* Sign out */}
+      <button
+        onClick={async () => {
+          await supabase.auth.signOut();
+          chrome.runtime.sendMessage({ action: "AUTH_SESSION_CHANGED" });
+        }}
+        style={{
+          width: "100%",
+          padding: "10px",
+          marginTop: "8px",
+          borderRadius: "8px",
+          border: "1px solid #e9e6e0",
+          backgroundColor: "transparent",
+          color: "#78746e",
+          fontSize: "12px",
+          fontWeight: 500,
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        Sign Out
       </button>
     </div>
   );

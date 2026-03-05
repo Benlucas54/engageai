@@ -192,62 +192,64 @@ ALTER TABLE commenter_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE smart_tags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
 
--- Profiles: anon can SELECT, INSERT, UPDATE, DELETE
-CREATE POLICY "profiles_select" ON profiles FOR SELECT TO anon USING (true);
-CREATE POLICY "profiles_insert" ON profiles FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "profiles_update" ON profiles FOR UPDATE TO anon USING (true);
-CREATE POLICY "profiles_delete" ON profiles FOR DELETE TO anon USING (true);
+-- Profiles: anon + authenticated can SELECT, INSERT, UPDATE, DELETE
+CREATE POLICY "profiles_select" ON profiles FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "profiles_insert" ON profiles FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "profiles_update" ON profiles FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "profiles_delete" ON profiles FOR DELETE TO anon, authenticated USING (true);
 
--- Comments: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "comments_select" ON comments FOR SELECT TO anon USING (true);
-CREATE POLICY "comments_insert" ON comments FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "comments_update" ON comments FOR UPDATE TO anon USING (true);
+-- Comments: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "comments_select" ON comments FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "comments_insert" ON comments FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "comments_update" ON comments FOR UPDATE TO anon, authenticated USING (true);
 
--- Replies: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "replies_select" ON replies FOR SELECT TO anon USING (true);
-CREATE POLICY "replies_insert" ON replies FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "replies_update" ON replies FOR UPDATE TO anon USING (true);
+-- Replies: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "replies_select" ON replies FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "replies_insert" ON replies FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "replies_update" ON replies FOR UPDATE TO anon, authenticated USING (true);
 
--- Voice settings: anon can SELECT, UPDATE, INSERT, DELETE
-CREATE POLICY "voice_settings_select" ON voice_settings FOR SELECT TO anon USING (true);
-CREATE POLICY "voice_settings_update" ON voice_settings FOR UPDATE TO anon USING (true);
-CREATE POLICY "voice_settings_insert" ON voice_settings FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "voice_settings_delete" ON voice_settings FOR DELETE TO anon USING (true);
+-- Voice settings: anon + authenticated can SELECT, UPDATE, INSERT, DELETE
+CREATE POLICY "voice_settings_select" ON voice_settings FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "voice_settings_update" ON voice_settings FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "voice_settings_insert" ON voice_settings FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "voice_settings_delete" ON voice_settings FOR DELETE TO anon, authenticated USING (true);
 
--- Agent runs: anon can SELECT only
-CREATE POLICY "agent_runs_select" ON agent_runs FOR SELECT TO anon USING (true);
+-- Agent runs: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "agent_runs_select" ON agent_runs FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "agent_runs_insert" ON agent_runs FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "agent_runs_update" ON agent_runs FOR UPDATE TO anon, authenticated USING (true);
 
--- Linked accounts: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "linked_accounts_select" ON linked_accounts FOR SELECT TO anon USING (true);
-CREATE POLICY "linked_accounts_insert" ON linked_accounts FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "linked_accounts_update" ON linked_accounts FOR UPDATE TO anon USING (true);
+-- Linked accounts: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "linked_accounts_select" ON linked_accounts FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "linked_accounts_insert" ON linked_accounts FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "linked_accounts_update" ON linked_accounts FOR UPDATE TO anon, authenticated USING (true);
 
--- Commenter profiles: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "commenter_profiles_select" ON commenter_profiles FOR SELECT TO anon USING (true);
-CREATE POLICY "commenter_profiles_insert" ON commenter_profiles FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "commenter_profiles_update" ON commenter_profiles FOR UPDATE TO anon USING (true);
+-- Commenter profiles: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "commenter_profiles_select" ON commenter_profiles FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "commenter_profiles_insert" ON commenter_profiles FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "commenter_profiles_update" ON commenter_profiles FOR UPDATE TO anon, authenticated USING (true);
 
--- Voice examples: anon can SELECT, INSERT, DELETE
-CREATE POLICY "voice_examples_select" ON voice_examples FOR SELECT TO anon USING (true);
-CREATE POLICY "voice_examples_insert" ON voice_examples FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "voice_examples_delete" ON voice_examples FOR DELETE TO anon USING (true);
+-- Voice examples: anon + authenticated can SELECT, INSERT, DELETE
+CREATE POLICY "voice_examples_select" ON voice_examples FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "voice_examples_insert" ON voice_examples FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "voice_examples_delete" ON voice_examples FOR DELETE TO anon, authenticated USING (true);
 
--- Voice documents: anon can SELECT, INSERT, DELETE
-CREATE POLICY "voice_documents_select" ON voice_documents FOR SELECT TO anon USING (true);
-CREATE POLICY "voice_documents_insert" ON voice_documents FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "voice_documents_delete" ON voice_documents FOR DELETE TO anon USING (true);
+-- Voice documents: anon + authenticated can SELECT, INSERT, DELETE
+CREATE POLICY "voice_documents_select" ON voice_documents FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "voice_documents_insert" ON voice_documents FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "voice_documents_delete" ON voice_documents FOR DELETE TO anon, authenticated USING (true);
 
--- Smart tags: anon can SELECT, INSERT, UPDATE, DELETE
-CREATE POLICY "smart_tags_select" ON smart_tags FOR SELECT TO anon USING (true);
-CREATE POLICY "smart_tags_insert" ON smart_tags FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "smart_tags_update" ON smart_tags FOR UPDATE TO anon USING (true);
-CREATE POLICY "smart_tags_delete" ON smart_tags FOR DELETE TO anon USING (true);
+-- Smart tags: anon + authenticated can SELECT, INSERT, UPDATE, DELETE
+CREATE POLICY "smart_tags_select" ON smart_tags FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "smart_tags_insert" ON smart_tags FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "smart_tags_update" ON smart_tags FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "smart_tags_delete" ON smart_tags FOR DELETE TO anon, authenticated USING (true);
 
--- Customers: anon can SELECT, INSERT, UPDATE, DELETE
-CREATE POLICY "customers_select" ON customers FOR SELECT TO anon USING (true);
-CREATE POLICY "customers_insert" ON customers FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "customers_update" ON customers FOR UPDATE TO anon USING (true);
-CREATE POLICY "customers_delete" ON customers FOR DELETE TO anon USING (true);
+-- Customers: anon + authenticated can SELECT, INSERT, UPDATE, DELETE
+CREATE POLICY "customers_select" ON customers FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "customers_insert" ON customers FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "customers_update" ON customers FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "customers_delete" ON customers FOR DELETE TO anon, authenticated USING (true);
 
 -- ============================================================
 -- SEED DATA
@@ -333,10 +335,10 @@ CREATE INDEX IF NOT EXISTS idx_automation_rules_priority ON automation_rules(pri
 
 ALTER TABLE automation_rules ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "automation_rules_select" ON automation_rules FOR SELECT TO anon USING (true);
-CREATE POLICY "automation_rules_insert" ON automation_rules FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "automation_rules_update" ON automation_rules FOR UPDATE TO anon USING (true);
-CREATE POLICY "automation_rules_delete" ON automation_rules FOR DELETE TO anon USING (true);
+CREATE POLICY "automation_rules_select" ON automation_rules FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "automation_rules_insert" ON automation_rules FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "automation_rules_update" ON automation_rules FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "automation_rules_delete" ON automation_rules FOR DELETE TO anon, authenticated USING (true);
 
 -- Add automation_rule_id to replies to track which rule triggered a reply
 ALTER TABLE replies ADD COLUMN IF NOT EXISTS automation_rule_id UUID REFERENCES automation_rules(id) ON DELETE SET NULL;
@@ -412,21 +414,21 @@ ALTER TABLE followers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follower_action_rules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE follower_actions ENABLE ROW LEVEL SECURITY;
 
--- Followers: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "followers_select" ON followers FOR SELECT TO anon USING (true);
-CREATE POLICY "followers_insert" ON followers FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "followers_update" ON followers FOR UPDATE TO anon USING (true);
+-- Followers: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "followers_select" ON followers FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "followers_insert" ON followers FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "followers_update" ON followers FOR UPDATE TO anon, authenticated USING (true);
 
--- Follower action rules: anon can SELECT, INSERT, UPDATE, DELETE
-CREATE POLICY "follower_action_rules_select" ON follower_action_rules FOR SELECT TO anon USING (true);
-CREATE POLICY "follower_action_rules_insert" ON follower_action_rules FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "follower_action_rules_update" ON follower_action_rules FOR UPDATE TO anon USING (true);
-CREATE POLICY "follower_action_rules_delete" ON follower_action_rules FOR DELETE TO anon USING (true);
+-- Follower action rules: anon + authenticated can SELECT, INSERT, UPDATE, DELETE
+CREATE POLICY "follower_action_rules_select" ON follower_action_rules FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "follower_action_rules_insert" ON follower_action_rules FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "follower_action_rules_update" ON follower_action_rules FOR UPDATE TO anon, authenticated USING (true);
+CREATE POLICY "follower_action_rules_delete" ON follower_action_rules FOR DELETE TO anon, authenticated USING (true);
 
--- Follower actions: anon can SELECT, INSERT, UPDATE
-CREATE POLICY "follower_actions_select" ON follower_actions FOR SELECT TO anon USING (true);
-CREATE POLICY "follower_actions_insert" ON follower_actions FOR INSERT TO anon WITH CHECK (true);
-CREATE POLICY "follower_actions_update" ON follower_actions FOR UPDATE TO anon USING (true);
+-- Follower actions: anon + authenticated can SELECT, INSERT, UPDATE
+CREATE POLICY "follower_actions_select" ON follower_actions FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "follower_actions_insert" ON follower_actions FOR INSERT TO anon, authenticated WITH CHECK (true);
+CREATE POLICY "follower_actions_update" ON follower_actions FOR UPDATE TO anon, authenticated USING (true);
 
 -- ============================================================
 -- STORAGE BUCKET (run this separately or via Supabase dashboard)

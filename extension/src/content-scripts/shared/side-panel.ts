@@ -238,11 +238,21 @@ function renderExpandedPanel(container: HTMLElement): void {
         chrome.runtime.sendMessage(
           { action: "GENERATE_SUGGESTION_FOR_COMMENT", commentExternalId: item.commentExternalId },
           (res) => {
+            if (chrome.runtime.lastError) {
+              console.error("[EngageAI] Side panel generate error:", chrome.runtime.lastError.message);
+              genBtn.textContent = "Error";
+              genBtn.title = chrome.runtime.lastError.message || "Extension error";
+              genBtn.style.opacity = "1";
+              return;
+            }
             if (res?.success && res.draftText) {
               item.draftText = res.draftText;
               renderPanel();
             } else {
+              const errMsg = res?.error || "Generation failed";
+              console.error("[EngageAI] Side panel generate failed:", errMsg);
               genBtn.textContent = "Failed";
+              genBtn.title = errMsg;
               genBtn.style.opacity = "1";
             }
           }

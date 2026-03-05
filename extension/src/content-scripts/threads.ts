@@ -1,6 +1,4 @@
-import type { ScrapedComment, EngagedComment, CommentMark, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
-import { startReplyDetector } from "../lib/reply-detector";
-import { showInlineWidget, showEngagementWidget } from "../lib/inline-widget";
+import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 import { initSidePanel, updatePanelData } from "./shared/side-panel";
 
 function parseRelativeTime(text: string): string {
@@ -64,6 +62,9 @@ function parseContainer(el: Element): ParsedContainer | null {
       t !== "·" &&
       t !== "Author" &&
       !/^\d+$/.test(t) &&
+      !/^\d+(s|m|h|d|w|mo|y)$/i.test(t) &&
+      !/^Replying to @/i.test(t) &&
+      !/^(like|reply|repost|share|send)$/i.test(t) &&
       t.length > 1
     ) {
       text = t;
@@ -166,17 +167,21 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
     if (!card || seen.has(card)) continue;
     seen.add(card);
 
-    // On the replies tab, every card is a reply — skip the notification text check.
-    // On the general activity page, only accept reply/comment notifications.
+    // Skip non-comment notifications (likes, follows, etc.) on the general
+    // activity page by excluding cards whose ONLY text matches known
+    // non-comment patterns.  Cards with actual comment text will pass through
+    // and get picked up by the text-extraction step below.
     if (!isRepliesTab()) {
       const fullText = card.textContent?.toLowerCase() || "";
-      const isReplyNotification =
-        /replied to your/i.test(fullText) ||
-        /commented on your/i.test(fullText) ||
-        /replied to a thread/i.test(fullText);
-      if (!isReplyNotification) {
-        continue;
-      }
+      const isNonComment =
+        // Explicit non-comment notification text
+        /liked your/i.test(fullText) || /followed/i.test(fullText) ||
+        /mentioned you in/i.test(fullText) || /reposted your/i.test(fullText) ||
+        /quoted your/i.test(fullText) ||
+        // Group notifications ("and 5 others") are likes/follows, never comments
+        /and \d+ others?/i.test(fullText);
+      const isComment = /replied/i.test(fullText) || /commented/i.test(fullText);
+      if (isNonComment && !isComment) continue;
     }
 
     // Collect meaningful text spans (the actual comment text)
@@ -199,7 +204,7 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
         !/^replied to/i.test(t) &&
         !/^liked your/i.test(t) &&
         !/^mentioned you/i.test(t) &&
-        !/^followed/i.test(t) &&
+        !/followed/i.test(t) &&
         !/^commented on/i.test(t) &&
         !/^quoted your/i.test(t) &&
         !/\band \d+ others?\b/i.test(t)
@@ -314,230 +319,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// --- Comment indicators ---
-
-const MARKER_CLASS = "engageai-marker";
-const PANEL_CLASS = "engageai-suggestion-panel";
-
-function clearMarkers(): void {
-  document.querySelectorAll(`.${MARKER_CLASS}`).forEach((el) => el.remove());
-  removeSuggestionPanels();
-}
-
-function removeSuggestionPanels(): void {
-  document.querySelectorAll(`.${PANEL_CLASS}`).forEach((el) => el.remove());
-}
-
-function showSuggestionPanel(anchor: HTMLElement, mark: CommentMark): void {
-  removeSuggestionPanels();
-
-  const panel = document.createElement("div");
-  panel.className = PANEL_CLASS;
-  Object.assign(panel.style, {
-    position: "absolute",
-    top: "calc(100% + 6px)",
-    left: "0",
-    zIndex: "10000",
-    background: "#fff",
-    border: "1px solid #e0e0e0",
-    borderRadius: "8px",
-    padding: "12px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-    maxWidth: "320px",
-    minWidth: "240px",
-    fontSize: "13px",
-    lineHeight: "1.5",
-    color: "#333",
-  });
-
-  const label = document.createElement("div");
-  label.textContent = "AI Suggestion";
-  Object.assign(label.style, {
-    fontSize: "10px",
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    color: "#999",
-    marginBottom: "6px",
-  });
-  panel.appendChild(label);
-
-  if (mark.draftText) {
-    const draft = document.createElement("div");
-    draft.textContent = mark.draftText;
-    Object.assign(draft.style, {
-      marginBottom: "10px",
-      padding: "8px",
-      background: "#f5f5f5",
-      borderRadius: "6px",
-      fontSize: "12px",
-      lineHeight: "1.6",
-    });
-    panel.appendChild(draft);
-  } else {
-    const noDraft = document.createElement("div");
-    noDraft.textContent = "No suggestion generated yet";
-    Object.assign(noDraft.style, { marginBottom: "10px", color: "#999", fontSize: "12px" });
-    panel.appendChild(noDraft);
-  }
-
-  const btnRow = document.createElement("div");
-  Object.assign(btnRow.style, { display: "flex", gap: "6px" });
-
-  if (mark.draftText) {
-    const copyBtn = document.createElement("button");
-    copyBtn.textContent = "Copy";
-    Object.assign(copyBtn.style, {
-      padding: "6px 12px",
-      borderRadius: "6px",
-      border: "none",
-      background: "#333",
-      color: "#fff",
-      fontSize: "11px",
-      fontWeight: "600",
-      cursor: "pointer",
-    });
-    copyBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      navigator.clipboard.writeText(mark.draftText!).catch(() => {});
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => removeSuggestionPanels(), 800);
-    });
-    btnRow.appendChild(copyBtn);
-  } else {
-    const genBtn = document.createElement("button");
-    genBtn.textContent = "Generate";
-    Object.assign(genBtn.style, {
-      padding: "6px 12px",
-      borderRadius: "6px",
-      border: "none",
-      background: "#333",
-      color: "#fff",
-      fontSize: "11px",
-      fontWeight: "600",
-      cursor: "pointer",
-    });
-    genBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      genBtn.textContent = "Generating...";
-      genBtn.style.opacity = "0.6";
-      chrome.runtime.sendMessage(
-        { action: "GENERATE_SUGGESTION_FOR_COMMENT", commentExternalId: mark.comment_external_id },
-        (res) => {
-          if (res?.success && res.draftText) {
-            mark.draftText = res.draftText;
-            removeSuggestionPanels();
-            showSuggestionPanel(anchor, mark);
-          } else {
-            genBtn.textContent = "Failed";
-            genBtn.style.opacity = "1";
-          }
-        }
-      );
-    });
-    btnRow.appendChild(genBtn);
-  }
-
-  const dismissBtn = document.createElement("button");
-  dismissBtn.textContent = "Dismiss";
-  Object.assign(dismissBtn.style, {
-    padding: "6px 12px",
-    borderRadius: "6px",
-    border: "1px solid #ddd",
-    background: "transparent",
-    color: "#666",
-    fontSize: "11px",
-    cursor: "pointer",
-  });
-  dismissBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    removeSuggestionPanels();
-  });
-  btnRow.appendChild(dismissBtn);
-  panel.appendChild(btnRow);
-
-  const parent = anchor.parentElement;
-  if (parent) {
-    parent.style.position = "relative";
-    parent.appendChild(panel);
-  }
-}
-
-// Close panels on outside click
-document.addEventListener("click", (e) => {
-  const target = e.target as HTMLElement;
-  if (!target.closest(`.${PANEL_CLASS}`) && !target.closest(`.${MARKER_CLASS}`)) {
-    removeSuggestionPanels();
-  }
-});
-
-function injectMarkers(marks: CommentMark[]): void {
-  clearMarkers();
-  const containers = document.querySelectorAll('div[data-pressable-container="true"]');
-  for (const mark of marks) {
-    for (const el of containers) {
-      const text = el.textContent || "";
-      if (text.includes(mark.username) && text.includes(mark.comment_text_prefix)) {
-        const spans = el.querySelectorAll('span[dir="auto"]');
-        const usernameSpan = spans[0];
-        if (usernameSpan) {
-          const badge = document.createElement("span");
-          badge.className = MARKER_CLASS;
-          const hasDraft = !!mark.draftText;
-          Object.assign(badge.style, {
-            display: "inline-flex",
-            alignItems: "center",
-            padding: "1px 6px",
-            borderRadius: "10px",
-            backgroundColor: hasDraft ? "#e8f4fd" : "#f0ddb8",
-            color: hasDraft ? "#1a73a7" : "#92600a",
-            fontSize: "10px",
-            fontWeight: "600",
-            marginLeft: "6px",
-            cursor: "pointer",
-            position: "relative",
-            zIndex: "9999",
-            lineHeight: "1.4",
-          });
-          badge.textContent = hasDraft ? "AI" : "Pending";
-          badge.title = hasDraft ? "Click to view AI suggestion" : "Click for options";
-          badge.addEventListener("click", (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            showSuggestionPanel(badge, mark);
-          });
-          usernameSpan.parentElement?.insertBefore(badge, usernameSpan.nextSibling);
-        }
-        break;
-      }
-    }
-  }
-}
-
-// --- Inline reply helper ---
-chrome.storage.local.get("inline_helper_enabled", ({ inline_helper_enabled }) => {
-  if (inline_helper_enabled === false) return;
-  startReplyDetector(
-    "threads",
-    (ctx) => showInlineWidget(ctx),
-    (ctx) => showEngagementWidget(ctx)
-  );
-});
-
 // --- Side panel ---
 initSidePanel();
-
-// Clear markers on SPA navigation
-let _lastUrl = location.href;
-new MutationObserver(() => {
-  if (location.href !== _lastUrl) {
-    _lastUrl = location.href;
-    clearMarkers();
-  }
-}).observe(document.body, { childList: true, subtree: true });
 
 chrome.runtime.onMessage.addListener(
   (
@@ -552,42 +335,9 @@ chrome.runtime.onMessage.addListener(
       return true; // async response
     }
 
-    if (message.action === "MARK_COMMENTS") {
-      injectMarkers(message.marks || []);
-      sendResponse({ success: true });
-    }
-
-    if (message.action === "CLEAR_MARKS") {
-      clearMarkers();
-      sendResponse({ success: true });
-    }
-
     if (message.action === "UPDATE_SIDE_PANEL") {
       if (message.sidePanelItems) {
         updatePanelData(message.sidePanelItems);
-      }
-      sendResponse({ success: true });
-    }
-
-    if (message.action === "SHOW_SUGGESTION") {
-      const containers = document.querySelectorAll('div[data-pressable-container="true"]');
-      for (const el of containers) {
-        const text = el.textContent || "";
-        if (message.username && text.includes(message.username)) {
-          const spans = el.querySelectorAll('span[dir="auto"]');
-          if (spans[0]) {
-            showSuggestionPanel(spans[0] as HTMLElement, {
-              comment_external_id: message.commentExternalId || "",
-              username: message.username,
-              comment_text_prefix: "",
-              status: "flagged",
-              draftText: message.draftText,
-              postUrl: message.postUrl,
-              commentId: message.commentId,
-            });
-            break;
-          }
-        }
       }
       sendResponse({ success: true });
     }

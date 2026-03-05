@@ -38,7 +38,7 @@ interface ScrapedComment {
 }
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 });
 
 function selectExamples(
@@ -265,8 +265,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply_text: replyText });
   } catch (err) {
     console.error("[generate-reply] Error:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    let userMessage = "Failed to generate reply";
+    if (message.includes("api_key") || message.includes("authentication")) {
+      userMessage = "AI service configuration error";
+    } else if (message.includes("rate_limit") || message.includes("overloaded")) {
+      userMessage = "AI service temporarily unavailable — try again shortly";
+    } else if (message.includes("Connection error")) {
+      userMessage = "Could not connect to AI service";
+    }
     return NextResponse.json(
-      { error: "Failed to generate reply" },
+      { error: userMessage },
       { status: 500 }
     );
   }

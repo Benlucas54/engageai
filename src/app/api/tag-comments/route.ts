@@ -6,7 +6,7 @@ import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 export const dynamic = "force-dynamic";
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 });
 
 interface TagInput {

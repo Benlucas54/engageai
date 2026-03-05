@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 });
 
 const SYSTEM_PROMPT = `You are a brand voice analyst. The user will provide text from uploaded brand documents (brand guides, past content, example replies, etc.).

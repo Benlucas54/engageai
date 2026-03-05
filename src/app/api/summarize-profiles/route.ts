@@ -4,7 +4,7 @@ import { createServerClient } from "@/lib/supabase-server";
 import { getUserFromRequest, withUsageGating } from "@/lib/subscription";
 
 const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
+  apiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 });
 
 interface CommenterInput {

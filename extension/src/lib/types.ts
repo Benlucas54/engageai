@@ -81,37 +81,10 @@ export interface ScanResult {
   status: "auto-approved" | "flagged" | "error";
 }
 
-export interface CommentMark {
-  comment_external_id: string;
-  username: string;
-  comment_text_prefix: string;
-  status: "pending" | "flagged";
-  draftText?: string;
-  postUrl?: string;
-  commentId?: string;
-}
-
-export interface EngagementContext {
-  postAuthor: string;
-  postCaption: string;
-  postUrl: string;
-  existingComments: { username: string; text: string }[];
-  platform: Platform;
-  replyInput: HTMLElement;
-}
-
 export interface ContentScriptMessage {
-  action: "SCRAPE" | "MARK_COMMENTS" | "CLEAR_MARKS" | "SHOW_SUGGESTION" | "UPDATE_SIDE_PANEL" | "FILL_REPLY_INPUT";
+  action: "SCRAPE" | "UPDATE_SIDE_PANEL";
   ownerUsername?: string;
-  marks?: CommentMark[];
-  username?: string;
-  postUrl?: string;
-  commentExternalId?: string;
-  draftText?: string;
-  commentId?: string;
   sidePanelItems?: SidePanelItem[];
-  fillText?: string;
-  platform?: Platform;
 }
 
 export interface EngagedComment {
