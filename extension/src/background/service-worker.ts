@@ -259,39 +259,13 @@ async function handleScrape(
       .eq("id", commentId);
   }
 
-  // Phase 3: For each comment, generate reply as draft suggestion
-  for (const { inserted, original: comment } of insertedComments) {
-    const smartTag = tagMap[inserted.id] || null;
-
-    try {
-      const profile = await getCommenterProfile(comment.platform, comment.username);
-      const replyText = await generateReply(comment, profile);
-
-      // All replies are draft suggestions — never auto-approve
-      const { data: reply } = await supabase
-        .from("replies")
-        .insert({
-          comment_id: inserted.id,
-          reply_text: replyText,
-          draft_text: replyText,
-          approved: false,
-          auto_sent: false,
-        })
-        .select()
-        .single();
-
-      results.push({
-        comment: { ...inserted, status: "flagged" },
-        reply,
-        status: "flagged",
-      });
-
-      // Delay between API calls
-      await new Promise((r) => setTimeout(r, 500));
-    } catch (err) {
-      console.error("Error generating reply:", err);
-      results.push({ comment: inserted, status: "error" });
-    }
+  // Add inserted comments to results (replies generated on-demand by user)
+  for (const { inserted } of insertedComments) {
+    results.push({
+      comment: { ...inserted, status: "flagged" },
+      reply: undefined,
+      status: "flagged",
+    });
   }
 
   // Fire-and-forget: update profile summaries in the background
@@ -654,7 +628,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const { data: dismissedComments } = await dismissedQuery;
 
         const results: ScanResult[] = [];
-        const needsGeneration: Comment[] = [];
 
         for (const row of (comments || [])) {
           const { replies: r, ...comment } = row as any;
@@ -664,7 +637,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             reply,
             status: comment.status === "flagged" ? "flagged" : "auto-approved",
           });
-          if (!reply) needsGeneration.push(comment as Comment);
         }
 
         // Build dismissed results
@@ -678,27 +650,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
 
         sendResponse({ success: true, results, dismissed, platform });
-
-        // Fire-and-forget: generate replies for comments missing them
-        if (needsGeneration.length > 0) {
-          console.log(`[EngageAI] Generating replies for ${needsGeneration.length} comments without drafts`);
-          for (const comment of needsGeneration) {
-            try {
-              const profile = await getCommenterProfile(comment.platform, comment.username);
-              const replyText = await generateReply(comment, profile);
-              await supabase.from("replies").insert({
-                comment_id: comment.id,
-                reply_text: replyText,
-                draft_text: replyText,
-                approved: false,
-                auto_sent: false,
-              });
-              console.log(`[EngageAI] Generated reply for comment ${comment.id}`);
-            } catch (err) {
-              console.error(`[EngageAI] Failed to generate reply for ${comment.id}:`, err);
-            }
-          }
-        }
       } catch (err) {
         sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
       }
