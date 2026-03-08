@@ -30,6 +30,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "Automations", icon: "\u26A1",  href: "/automations" },
   { id: "Settings",    icon: "\u2699",  href: "/settings" },
   { id: "Setup",    icon: "\u2605", href: "/setup" },
+  { id: "Users",    icon: "\u25CB", href: "/users", adminOnly: true },
 ];
 
 export const PROFILE_COLORS = [

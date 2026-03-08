@@ -156,6 +156,7 @@ export interface NavItem {
   icon: string;
   href: string;
   alert?: boolean;
+  adminOnly?: boolean;
 }
 
 export interface Follower {

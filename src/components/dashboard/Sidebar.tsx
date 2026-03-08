@@ -8,17 +8,21 @@ import { useFollowers } from "@/hooks/useFollowers";
 import { useState, useEffect } from "react";
 import { getSupabase } from "@/lib/supabase";
 
+const ADMIN_USER_ID = "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0";
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
     getSupabase()
       .auth.getUser()
-      .then(({ data }: { data: { user: { email?: string | null } | null } }) =>
-        setEmail(data.user?.email ?? null),
-      );
+      .then(({ data }: { data: { user: { id?: string; email?: string | null } | null } }) => {
+        setEmail(data.user?.email ?? null);
+        setUserId(data.user?.id ?? null);
+      });
   }, []);
   const { comments } = useComments();
   const { followers } = useFollowers();
@@ -53,7 +57,7 @@ export function Sidebar() {
 
       {/* Nav links */}
       <nav className="px-3 py-4 flex-1">
-        {NAV_ITEMS.map(({ id, icon, href, alert }) => {
+        {NAV_ITEMS.filter(({ adminOnly }) => !adminOnly || userId === ADMIN_USER_ID).map(({ id, icon, href, alert }) => {
           const active = pathname === href;
           return (
             <Link
