@@ -30,7 +30,7 @@ function isPostPage(): boolean {
 }
 
 function isActivityPage(): boolean {
-  return /threads\.(net|com)\/(activity|@[\w.]+\/replies)/.test(window.location.href);
+  return /threads\.(net|com)\/activity(\/|$)/.test(window.location.href);
 }
 
 function isRepliesTab(): boolean {
@@ -167,21 +167,17 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
     if (!card || seen.has(card)) continue;
     seen.add(card);
 
-    // Skip non-comment notifications (likes, follows, etc.) on the general
-    // activity page by excluding cards whose ONLY text matches known
-    // non-comment patterns.  Cards with actual comment text will pass through
-    // and get picked up by the text-extraction step below.
+    // Skip non-reply cards: suggested threads, picked-for-you, follows, likes.
+    // Real reply/comment cards don't contain these markers.
     if (!isRepliesTab()) {
-      const fullText = card.textContent?.toLowerCase() || "";
-      const isNonComment =
-        // Explicit non-comment notification text
-        /liked your/i.test(fullText) || /followed/i.test(fullText) ||
-        /mentioned you in/i.test(fullText) || /reposted your/i.test(fullText) ||
-        /quoted your/i.test(fullText) ||
-        // Group notifications ("and 5 others") are likes/follows, never comments
+      const fullText = card.textContent || "";
+      const isNonReply =
+        /suggested thread/i.test(fullText) ||
+        /picked for you/i.test(fullText) ||
+        /because you follow/i.test(fullText) ||
+        /followed from your post/i.test(fullText) ||
         /and \d+ others?/i.test(fullText);
-      const isComment = /replied/i.test(fullText) || /commented/i.test(fullText);
-      if (isNonComment && !isComment) continue;
+      if (isNonReply) continue;
     }
 
     // Collect meaningful text spans (the actual comment text)
@@ -307,7 +303,6 @@ async function scrollToLoadMore(): Promise<void> {
 }
 
 async function scrape(ownerUsername: string): Promise<ScrapeActivityResult> {
-  if (isPostPage()) return { comments: scrapePostPage(), engagedComments: [] };
   if (isActivityPage()) {
     await scrollToLoadMore();
     return scrapeActivityPage(ownerUsername);
@@ -338,6 +333,30 @@ chrome.runtime.onMessage.addListener(
     if (message.action === "UPDATE_SIDE_PANEL") {
       if (message.sidePanelItems) {
         updatePanelData(message.sidePanelItems);
+      }
+      sendResponse({ success: true });
+    }
+
+    if (message.action === "JUMP_TO_COMMENT") {
+      const { username, textPrefix } = message as any;
+      const allEls = document.querySelectorAll(
+        'div[data-pressable-container="true"], div[role="listitem"], div[role="article"], div[role="row"]'
+      );
+      for (const el of allEls) {
+        const text = el.textContent || "";
+        if (text.includes(username) && text.includes(textPrefix)) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          const htmlEl = el as HTMLElement;
+          const orig = htmlEl.style.outline;
+          const origT = htmlEl.style.transition;
+          htmlEl.style.transition = "outline 0.3s ease";
+          htmlEl.style.outline = "2px solid #3a6e8c";
+          setTimeout(() => {
+            htmlEl.style.outline = orig;
+            htmlEl.style.transition = origT;
+          }, 3000);
+          break;
+        }
       }
       sendResponse({ success: true });
     }

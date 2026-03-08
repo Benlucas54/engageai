@@ -86,10 +86,12 @@ function renderPanel(): void {
   container.innerHTML = "";
 
   if (isCollapsed) {
-    renderCollapsedTab(container);
-  } else {
-    renderExpandedPanel(container);
+    // Don't render anything when collapsed — no floating icon
+    container.style.display = "none";
+    return;
   }
+  container.style.display = "flex";
+  renderExpandedPanel(container);
 }
 
 function renderCollapsedTab(container: HTMLElement): void {

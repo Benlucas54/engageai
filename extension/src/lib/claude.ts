@@ -167,10 +167,20 @@ export async function tagComments(
   if (comments.length === 0) return {};
 
   try {
+    const token = await ensureSession();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    // Get user_id for smart tag lookup
+    const { data: { user } } = await supabase.auth.getUser();
+    const user_id = user?.id;
+
     const res = await fetch(`${API_URL}/api/tag-comments`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ comments }),
+      headers,
+      body: JSON.stringify({ comments, user_id }),
     });
 
     if (!res.ok) {

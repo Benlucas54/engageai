@@ -369,7 +369,7 @@ export default function InboxTab() {
                 </button>
               </div>
             ) : !isSent && (
-              <div style={{ display: "flex", gap: "6px" }}>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                 {hasSuggestion ? (
                   <button
                     onClick={() => handleCopy(result.comment.id, result.reply!.draft_text || result.reply!.reply_text)}
@@ -458,6 +458,32 @@ export default function InboxTab() {
                   }}
                 >
                   Dismiss
+                </button>
+                <button
+                  onClick={() => {
+                    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+                      if (tabs[0]?.id) {
+                        chrome.tabs.sendMessage(tabs[0].id, {
+                          action: "JUMP_TO_COMMENT",
+                          username: result.comment.username,
+                          textPrefix: result.comment.comment_text.slice(0, 20),
+                        });
+                      }
+                    });
+                  }}
+                  style={{
+                    padding: "5px 14px",
+                    borderRadius: "6px",
+                    border: "1px solid #e9e6e0",
+                    backgroundColor: "#fff",
+                    color: "#555",
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Jump to
                 </button>
               </div>
             )}

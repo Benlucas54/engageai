@@ -72,5 +72,29 @@ chrome.runtime.onMessage.addListener(
       }
       sendResponse({ success: true });
     }
+
+    if (message.action === "JUMP_TO_COMMENT") {
+      const { username, textPrefix } = message as any;
+      const allEls = document.querySelectorAll(
+        'ul ul li, div[class*="comment"], article[data-testid="tweet"], div[data-e2e="comment-item"], div[role="listitem"], div[role="article"]'
+      );
+      for (const el of allEls) {
+        const text = el.textContent || "";
+        if (text.includes(username) && text.includes(textPrefix)) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          const htmlEl = el as HTMLElement;
+          const orig = htmlEl.style.outline;
+          const origT = htmlEl.style.transition;
+          htmlEl.style.transition = "outline 0.3s ease";
+          htmlEl.style.outline = "2px solid #3a6e8c";
+          setTimeout(() => {
+            htmlEl.style.outline = orig;
+            htmlEl.style.transition = origT;
+          }, 3000);
+          break;
+        }
+      }
+      sendResponse({ success: true });
+    }
   }
 );
