@@ -350,7 +350,7 @@ chrome.runtime.onMessage.addListener(
           const orig = htmlEl.style.outline;
           const origT = htmlEl.style.transition;
           htmlEl.style.transition = "outline 0.3s ease";
-          htmlEl.style.outline = "2px solid #3a6e8c";
+          htmlEl.style.outline = "2px solid #f97316";
           setTimeout(() => {
             htmlEl.style.outline = orig;
             htmlEl.style.transition = origT;

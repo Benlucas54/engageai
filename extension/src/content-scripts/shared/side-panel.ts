@@ -292,7 +292,7 @@ function jumpToComment(username: string, textPrefix: string): void {
       const originalOutline = htmlEl.style.outline;
       const originalTransition = htmlEl.style.transition;
       htmlEl.style.transition = "outline 0.3s ease";
-      htmlEl.style.outline = "2px solid #3a6e8c";
+      htmlEl.style.outline = "2px solid #f97316";
       setTimeout(() => {
         htmlEl.style.outline = originalOutline;
         htmlEl.style.transition = originalTransition;
