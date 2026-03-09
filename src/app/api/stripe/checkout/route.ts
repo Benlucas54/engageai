@@ -52,10 +52,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Apply founder coupon for Pro signups if available and still has redemptions
+    let discounts: { coupon: string }[] | undefined;
+    const founderCouponId = process.env.STRIPE_FOUNDER_COUPON_ID;
+    if (planId === "pro" && founderCouponId) {
+      try {
+        const coupon = await stripe.coupons.retrieve(founderCouponId);
+        if (coupon.valid) {
+          discounts = [{ coupon: founderCouponId }];
+        }
+      } catch {
+        // Coupon not found or expired — proceed without discount
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
+      ...(discounts ? { discounts } : {}),
       success_url: `${req.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL}/settings?billing=success`,
       cancel_url: `${req.headers.get("origin") || process.env.NEXT_PUBLIC_APP_URL}/pricing`,
       metadata: { supabase_user_id: userId },
