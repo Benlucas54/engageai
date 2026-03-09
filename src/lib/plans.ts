@@ -1,4 +1,4 @@
-export type PlanId = "free" | "starter" | "pro" | "enterprise";
+export type PlanId = "free" | "basic" | "pro" | "enterprise";
 
 export interface PlanLimits {
   ai_replies: number;
@@ -27,7 +27,7 @@ export interface PlanDefinition {
   id: PlanId;
   name: string;
   description: string;
-  price: number | null; // monthly price in USD, null = custom
+  price: number | null; // monthly price in GBP, null = custom
   stripePriceId: string | null;
   limits: PlanLimits;
   features: PlanFeatures;
@@ -40,23 +40,23 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   free: {
     id: "free",
     name: "Free",
-    description: "Get started with AI-powered replies",
+    description: "Full access to scraping, CRM, and inbox — no AI",
     price: 0,
     stripePriceId: null,
     limits: {
-      ai_replies: 25,
-      follower_messages: 5,
-      comment_tags: 50,
-      voice_analyses: 2,
-      voice_enhancements: 10,
-      follower_analyses: 10,
-      profile_summaries: 10,
+      ai_replies: 0,
+      follower_messages: 0,
+      comment_tags: 0,
+      voice_analyses: 0,
+      voice_enhancements: 0,
+      follower_analyses: 0,
+      profile_summaries: 0,
       max_profiles: 1,
       max_linked_accounts: 2,
     },
     features: {
       automations: false,
-      crm: false,
+      crm: true,
       follower_tools: false,
       voice_documents: false,
       custom_smart_tags: false,
@@ -65,26 +65,26 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
       priority_support: false,
     },
   },
-  starter: {
-    id: "starter",
-    name: "Starter",
-    description: "For creators growing their engagement",
-    price: 19,
-    stripePriceId: process.env.STRIPE_STARTER_PRICE_ID || null,
+  basic: {
+    id: "basic",
+    name: "Basic",
+    description: "AI-powered replies and follower tools",
+    price: 8.99,
+    stripePriceId: process.env.STRIPE_BASIC_PRICE_ID || null,
     limits: {
-      ai_replies: 200,
-      follower_messages: 50,
-      comment_tags: 500,
-      voice_analyses: 10,
-      voice_enhancements: 50,
-      follower_analyses: 50,
-      profile_summaries: 50,
+      ai_replies: 100,
+      follower_messages: 20,
+      comment_tags: 200,
+      voice_analyses: 5,
+      voice_enhancements: 20,
+      follower_analyses: 20,
+      profile_summaries: 20,
       max_profiles: 1,
-      max_linked_accounts: 4,
+      max_linked_accounts: 3,
     },
     features: {
-      automations: true,
-      crm: false,
+      automations: false,
+      crm: true,
       follower_tools: true,
       voice_documents: true,
       custom_smart_tags: true,
@@ -97,16 +97,16 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     id: "pro",
     name: "Pro",
     description: "For businesses managing multiple brands",
-    price: 49,
+    price: 19.99,
     stripePriceId: process.env.STRIPE_PRO_PRICE_ID || null,
     limits: {
-      ai_replies: 1000,
-      follower_messages: 200,
-      comment_tags: 2000,
-      voice_analyses: 50,
-      voice_enhancements: 200,
-      follower_analyses: 200,
-      profile_summaries: 200,
+      ai_replies: 500,
+      follower_messages: 100,
+      comment_tags: 1000,
+      voice_analyses: 25,
+      voice_enhancements: 100,
+      follower_analyses: 100,
+      profile_summaries: 100,
       max_profiles: 5,
       max_linked_accounts: 12,
     },
@@ -124,7 +124,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   enterprise: {
     id: "enterprise",
     name: "Enterprise",
-    description: "Custom limits and dedicated support",
+    description: "Unlimited everything with priority support",
     price: null,
     stripePriceId: null,
     limits: {
@@ -151,7 +151,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
   },
 };
 
-export const PLAN_ORDER: PlanId[] = ["free", "starter", "pro", "enterprise"];
+export const PLAN_ORDER: PlanId[] = ["free", "basic", "pro", "enterprise"];
 
 export function getPlan(planId: PlanId): PlanDefinition {
   return PLANS[planId] || PLANS.free;

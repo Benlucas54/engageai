@@ -10,9 +10,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { priceId } = (await req.json()) as { priceId: string };
+    const { planId } = (await req.json()) as { planId: string };
+
+    const PRICE_MAP: Record<string, string | undefined> = {
+      basic: process.env.STRIPE_BASIC_PRICE_ID,
+      pro: process.env.STRIPE_PRO_PRICE_ID,
+    };
+
+    const priceId = PRICE_MAP[planId];
     if (!priceId) {
-      return NextResponse.json({ error: "Missing priceId" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
     const stripe = getStripe();

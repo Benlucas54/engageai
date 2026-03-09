@@ -16,6 +16,8 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getSupabase } from "@/lib/supabase";
 import { TAG_COLOR_PRESETS } from "@/lib/constants";
 import type { SmartTagDefinition } from "@/lib/types";
+import Link from "next/link";
+import { SetupView } from "@/components/dashboard/SetupView";
 import { BillingCard } from "@/components/dashboard/BillingCard";
 import { UsageCard } from "@/components/dashboard/UsageCard";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -737,6 +739,7 @@ export function SettingsView() {
     useProfiles();
   const [editingProfile, setEditingProfile] = useState<ProfileWithAccounts | null>(null);
   const [profileLimitHit, setProfileLimitHit] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
   const { limits } = useSubscription();
 
   if (loading) return null;
@@ -766,9 +769,72 @@ export function SettingsView() {
     setEditingProfile(null);
   };
 
+  const ANCHOR_LINKS = [
+    { label: "Profiles", anchor: "#profiles" },
+    { label: "Voices", anchor: "#voices" },
+    { label: "Smart Tags", anchor: "#smart-tags" },
+    { label: "Billing", anchor: "#billing" },
+    { label: "Usage", anchor: "#usage" },
+    { label: "Account", anchor: "#account" },
+  ];
+
+  const PAGE_LINKS = [
+    ...(USER_ID === "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0"
+      ? [{ label: "Users", href: "/users", icon: "\u25CB" }]
+      : []),
+  ];
+
   return (
     <div className="flex flex-col gap-3">
-      <Card>
+      <div className="flex items-center gap-2 flex-wrap">
+        {ANCHOR_LINKS.map(({ label, anchor }) => (
+          <a
+            key={label}
+            href={anchor}
+            className="flex items-center gap-1.5 px-3 py-[7px] rounded-lg border border-border bg-surface-card text-[12px] text-content-faint font-medium hover:text-content hover:border-content-faint transition-colors no-underline"
+          >
+            {label}
+          </a>
+        ))}
+        <button
+          onClick={() => setShowSetup(true)}
+          className="flex items-center gap-1.5 px-3 py-[7px] rounded-lg border border-border bg-surface-card text-[12px] text-content-faint font-medium hover:text-content hover:border-content-faint transition-colors cursor-pointer"
+        >
+          <span className="text-[11px] opacity-50">{"\u2605"}</span>
+          Setup
+        </button>
+        {PAGE_LINKS.map(({ label, href, icon }) => (
+          <Link
+            key={label}
+            href={href}
+            className="flex items-center gap-1.5 px-3 py-[7px] rounded-lg border border-border bg-surface-card text-[12px] text-content-faint font-medium hover:text-content hover:border-content-faint transition-colors no-underline"
+          >
+            <span className="text-[11px] opacity-50">{icon}</span>
+            {label}
+          </Link>
+        ))}
+      </div>
+
+      {showSetup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-surface-card border border-border rounded-xl w-full max-w-lg max-h-[80vh] overflow-y-auto shadow-xl">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-border">
+              <h2 className="text-[15px] font-semibold text-content">Setup Guide</h2>
+              <button
+                onClick={() => setShowSetup(false)}
+                className="text-content-faint hover:text-content transition-colors cursor-pointer bg-transparent border-none p-1"
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+            <SetupView />
+          </div>
+        </div>
+      )}
+
+      <Card id="profiles">
         <MiniLabel>Profiles</MiniLabel>
         <div className="mt-5 grid grid-cols-4 gap-3">
           {profiles.map((p) => (
@@ -789,15 +855,25 @@ export function SettingsView() {
         />
       )}
 
-      <VoicesCard profiles={profiles} />
+      <div id="voices">
+        <VoicesCard profiles={profiles} />
+      </div>
 
-      <SmartTagsCard />
+      <div id="smart-tags">
+        <SmartTagsCard />
+      </div>
 
-      <BillingCard />
+      <div id="billing">
+        <BillingCard />
+      </div>
 
-      <UsageCard />
+      <div id="usage">
+        <UsageCard />
+      </div>
 
-      <AccountCard />
+      <div id="account">
+        <AccountCard />
+      </div>
 
       <DangerZoneCard />
 

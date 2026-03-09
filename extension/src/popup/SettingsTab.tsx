@@ -127,12 +127,32 @@ export default function SettingsTab() {
         ))}
       </div>
 
+      {/* Pricing */}
+      <button
+        onClick={() => chrome.tabs.create({ url: "http://localhost:3000/pricing" })}
+        style={{
+          width: "100%",
+          padding: "10px",
+          borderRadius: "8px",
+          border: "1px solid #e9e6e0",
+          backgroundColor: "#1c1917",
+          color: "#ffffff",
+          fontSize: "12px",
+          fontWeight: 600,
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        Pricing
+      </button>
+
       {/* Open dashboard */}
       <button
         onClick={() => chrome.tabs.create({ url: "http://localhost:3000" })}
         style={{
           width: "100%",
           padding: "10px",
+          marginTop: "8px",
           borderRadius: "8px",
           border: "1px solid #e9e6e0",
           backgroundColor: "#ffffff",

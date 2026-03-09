@@ -66,7 +66,7 @@ export function BillingCard() {
           </div>
           {plan.price !== null && plan.price > 0 && (
             <p className="text-[11px] text-content-sub mt-0.5">
-              ${plan.price}/month
+              £{plan.price}/month
             </p>
           )}
         </div>

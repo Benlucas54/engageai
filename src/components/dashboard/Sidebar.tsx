@@ -83,26 +83,55 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Profile / Sign out */}
-      <div className="px-3 pb-4 group relative">
-        <div className="flex items-center gap-2.5 px-3 py-[9px] rounded-[7px] cursor-default">
+      {/* Bottom section */}
+      <div className="px-3 pb-1">
+        <Link
+          href="/pricing"
+          className={`w-full flex items-center gap-2.5 px-3 py-[9px] rounded-[7px] text-[13px] mb-0.5 transition-colors duration-[120ms] no-underline ${
+            pathname === "/pricing"
+              ? "bg-surface font-medium text-content"
+              : "bg-transparent font-normal text-content-faint"
+          }`}
+        >
+          <span className="text-xs opacity-50">{"\u25B3"}</span>
+          Pricing
+        </Link>
+      </div>
+      <div className="border-t border-border-light px-3 py-3">
+        <Link
+          href="/settings"
+          className={`w-full flex items-center gap-2.5 px-3 py-[9px] rounded-[7px] text-[13px] mb-0.5 transition-colors duration-[120ms] no-underline ${
+            pathname === "/settings"
+              ? "bg-surface font-medium text-content"
+              : "bg-transparent font-normal text-content-faint"
+          }`}
+        >
+          <span className="text-xs opacity-50">{"\u2699"}</span>
+          Settings
+        </Link>
+
+        {/* Profile / Sign out */}
+        <div className="flex items-center gap-2.5 px-3 py-[9px] mt-1">
           <div className="w-6 h-6 rounded-full bg-content-xfaint text-content text-[11px] font-semibold flex items-center justify-center shrink-0 uppercase">
             {email ? email[0] : "?"}
           </div>
-          <span className="text-[11px] text-content-faint truncate">
+          <span className="text-[11px] text-content-faint truncate flex-1 min-w-0">
             {email ?? "Loading..."}
           </span>
+          <button
+            onClick={async () => {
+              await getSupabase().auth.signOut();
+              router.push("/login");
+              router.refresh();
+            }}
+            className="shrink-0 p-1 rounded text-content-faint hover:text-content transition-colors cursor-pointer"
+            title="Sign out"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M6 2H3.5A1.5 1.5 0 0 0 2 3.5v9A1.5 1.5 0 0 0 3.5 14H6M10.5 11.5 14 8l-3.5-3.5M14 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         </div>
-        <button
-          onClick={async () => {
-            await getSupabase().auth.signOut();
-            router.push("/login");
-            router.refresh();
-          }}
-          className="hidden group-hover:block absolute bottom-full left-3 mb-1 px-3 py-[7px] rounded-[7px] text-[11px] text-content-faint bg-surface-sidebar border border-border-light cursor-pointer font-sans whitespace-nowrap"
-        >
-          Sign out
-        </button>
       </div>
     </div>
   );

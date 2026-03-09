@@ -4,7 +4,7 @@ import { UsersView } from "@/components/dashboard/UsersView";
 export default function UsersPage() {
   return (
     <>
-      <PageHeader title="Users" />
+      <PageHeader title="Users" backHref="/settings" />
       <UsersView />
     </>
   );

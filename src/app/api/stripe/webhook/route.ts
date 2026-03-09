@@ -16,7 +16,7 @@ function planIdFromPriceId(priceId: string): PlanId {
     }
   }
   // Check env vars directly as fallback
-  if (priceId === process.env.STRIPE_STARTER_PRICE_ID) return "starter";
+  if (priceId === process.env.STRIPE_BASIC_PRICE_ID) return "basic";
   if (priceId === process.env.STRIPE_PRO_PRICE_ID) return "pro";
   return "free";
 }
