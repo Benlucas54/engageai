@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSubscription } from "@/hooks/useSubscription";
-import { PLANS, PLAN_ORDER, isUnlimited, USAGE_FIELD_LABELS, type PlanId } from "@/lib/plans";
+import { useLayout } from "@/contexts/LayoutContext";
+import { PLANS, isUnlimited, USAGE_FIELD_LABELS, type PlanId } from "@/lib/plans";
 
 const CHECK = (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="inline-block mr-1.5 text-green-600">
@@ -34,7 +35,13 @@ function formatLimit(value: number): string {
 
 export default function PricingPage() {
   const { subscription, isLoading } = useSubscription();
+  const { setWide } = useLayout();
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
+
+  useEffect(() => {
+    setWide(true);
+    return () => setWide(false);
+  }, [setWide]);
 
   const currentPlanId = isLoading ? null : (subscription?.plan_id || "free");
 
@@ -77,9 +84,9 @@ export default function PricingPage() {
         </p>
       </div>
 
-      {/* Plan cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {PLAN_ORDER.map((planId) => {
+      {/* Plan cards — Free / Basic / Pro */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {(["free", "basic", "pro"] as PlanId[]).map((planId) => {
           const plan = PLANS[planId];
           const isPopular = planId === "pro";
           const isCurrent = planId === currentPlanId;
@@ -113,8 +120,6 @@ export default function PricingPage() {
               <div className="mt-4 mb-6">
                 {plan.price === 0 ? (
                   <span className="text-2xl font-bold text-content">Free</span>
-                ) : plan.price === null ? (
-                  <span className="text-2xl font-bold text-content">Custom</span>
                 ) : (
                   <>
                     <span className="text-2xl font-bold text-content">£{plan.price}</span>
@@ -138,8 +143,6 @@ export default function PricingPage() {
                   ? "Current plan"
                   : loadingPlan === planId
                   ? "Loading..."
-                  : planId === "enterprise"
-                  ? "Contact us"
                   : "Upgrade"}
               </button>
 
@@ -228,71 +231,91 @@ function EnterpriseSection() {
   };
 
   return (
-    <div id="enterprise" className="mt-12 border border-border bg-surface-card rounded-xl">
-      <div className="max-w-2xl mx-auto px-6 py-16">
-        <h2 className="text-xl font-semibold text-content text-center">Enterprise pricing</h2>
-        <p className="text-[13px] text-content-sub mt-2 text-center">
-          Adjust the sliders to estimate your monthly cost, then get in touch.
-        </p>
-
-        <div className="mt-10 flex flex-col gap-6">
-          {ENTERPRISE_SLIDERS.map((s) => (
-            <div key={s.key}>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-[13px] text-content font-medium">{s.label}</label>
-                <span className="text-[13px] text-content font-semibold">
-                  {values[s.key].toLocaleString()}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={s.min}
-                max={s.max}
-                step={s.step}
-                value={values[s.key]}
-                onChange={(e) => handleSlider(s.key, Number(e.target.value))}
-                className="w-full accent-content"
-              />
-              <div className="flex justify-between text-[10px] text-content-faint mt-1">
-                <span>{s.min.toLocaleString()}</span>
-                <span>{s.max.toLocaleString()}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-8 bg-surface border border-border rounded-xl p-6 text-center">
-          <p className="text-[12px] text-content-sub">Estimated monthly cost</p>
-          <p className="text-3xl font-bold text-content mt-1">
-            ~£{Math.round(estimated)}<span className="text-[14px] text-content-sub font-normal">/mo</span>
+    <div id="enterprise" className="mt-6 border border-border bg-surface-card rounded-xl p-6 md:p-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
+        {/* Left — heading + highlights */}
+        <div className="flex flex-col justify-center">
+          <h2 className="text-xl font-semibold text-content">Enterprise</h2>
+          <p className="text-[13px] text-content-sub mt-2 leading-relaxed">
+            Unlimited everything with priority support. Adjust the sliders to estimate your monthly cost, then get in touch.
           </p>
-          <p className="text-[11px] text-content-faint mt-1">
-            Final pricing confirmed after consultation
-          </p>
-        </div>
 
-        {!submitted ? (
-          <div className="mt-6 flex gap-3">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              className="flex-1 border border-border rounded-lg px-4 py-2.5 text-[13px] bg-white focus:outline-none focus:border-content"
-            />
-            <button
-              onClick={handleSubmit}
-              disabled={!email}
-              className="bg-content text-white text-[13px] font-medium px-6 py-2.5 rounded-lg border border-content cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              Get in touch
-            </button>
+          <div className="mt-6 flex flex-col gap-2">
+            {[
+              "Unlimited AI replies & follower messages",
+              "Unlimited profiles & linked accounts",
+              "Priority support & dedicated onboarding",
+              "Custom automations & integrations",
+            ].map((item) => (
+              <div key={item} className="text-[12px] flex items-center">
+                {CHECK}
+                <span className="text-content">{item}</span>
+              </div>
+            ))}
           </div>
-        ) : (
-          <p className="mt-6 text-center text-[13px] text-green-700">
-            Thanks! We&apos;ll be in touch shortly.
-          </p>
-        )}
+
+          <div className="mt-6 bg-surface border border-border rounded-xl p-5 text-center">
+            <p className="text-[12px] text-content-sub">Estimated monthly cost</p>
+            <p className="text-3xl font-bold text-content mt-1">
+              ~£{Math.round(estimated)}<span className="text-[14px] text-content-sub font-normal">/mo</span>
+            </p>
+            <p className="text-[11px] text-content-faint mt-1">
+              Final pricing confirmed after consultation
+            </p>
+          </div>
+        </div>
+
+        {/* Right — sliders + CTA */}
+        <div className="flex flex-col">
+          <div className="flex flex-col gap-5">
+            {ENTERPRISE_SLIDERS.map((s) => (
+              <div key={s.key}>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[13px] text-content font-medium">{s.label}</label>
+                  <span className="text-[13px] text-content font-semibold">
+                    {values[s.key].toLocaleString()}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={s.min}
+                  max={s.max}
+                  step={s.step}
+                  value={values[s.key]}
+                  onChange={(e) => handleSlider(s.key, Number(e.target.value))}
+                  className="w-full accent-content"
+                />
+                <div className="flex justify-between text-[10px] text-content-faint mt-1">
+                  <span>{s.min.toLocaleString()}</span>
+                  <span>{s.max.toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {!submitted ? (
+            <div className="mt-6 flex gap-3">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                className="flex-1 border border-border rounded-lg px-4 py-2.5 text-[13px] bg-white focus:outline-none focus:border-content"
+              />
+              <button
+                onClick={handleSubmit}
+                disabled={!email}
+                className="bg-content text-white text-[13px] font-medium px-6 py-2.5 rounded-lg border border-content cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                Get in touch
+              </button>
+            </div>
+          ) : (
+            <p className="mt-6 text-center text-[13px] text-green-700">
+              Thanks! We&apos;ll be in touch shortly.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
