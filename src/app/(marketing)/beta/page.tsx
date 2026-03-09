@@ -267,10 +267,10 @@ export default function BetaLandingPage() {
         <div className="max-w-[520px] mx-auto animate-fade-up">
           <Eyebrow>Founding members</Eyebrow>
           <h2 className="font-display text-[clamp(1.5rem,3.5vw,2.25rem)] leading-[1.15] tracking-[-0.03em] text-content mt-3">
-            Get in early. Lock in the price.
+            Get in early. Get more for less.
           </h2>
           <p className="text-[14px] leading-relaxed text-content-sub mt-4">
-            The first group of beta testers will get lifetime founding member pricing — a fraction of what this will cost at launch. In exchange, we want your honest feedback.
+            Founding members get 6 months at a fraction of the regular price, plus 500 bonus AI credits on top of your plan. In exchange, we want your honest feedback.
           </p>
         </div>
 
@@ -281,11 +281,11 @@ export default function BetaLandingPage() {
               <span className="font-display text-[48px] tracking-[-0.03em] text-content leading-none">£9</span>
               <span className="text-[14px] text-content-sub">/month</span>
             </div>
-            <p className="text-[12px] text-content-faint mt-1">Locked forever for early testers</p>
+            <p className="text-[12px] text-content-faint mt-1">for 6 months, then £19.99/mo</p>
             <div className="flex flex-wrap justify-center gap-1.5 mt-5">
               {[
                 "Full platform access",
-                "Unlimited AI drafts",
+                "500 bonus AI credits",
                 "Voice cloning",
                 "Priority support",
               ].map((f) => (

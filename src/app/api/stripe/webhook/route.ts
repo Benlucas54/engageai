@@ -120,6 +120,31 @@ export async function POST(req: NextRequest) {
           if (userId) {
             const stripeSubscription = await stripe.subscriptions.retrieve(subscriptionId);
             await upsertSubscription(supabase, userId, stripeSubscription, customerId);
+
+            // Grant bonus AI credits for founder coupon users
+            const founderCouponId = process.env.STRIPE_FOUNDER_COUPON_ID;
+            if (founderCouponId) {
+              const hasFounderCoupon = stripeSubscription.discounts?.some((d) => {
+                if (typeof d === "string") return false;
+                const coupon = d.source?.coupon;
+                if (!coupon || typeof coupon === "string") return false;
+                return coupon.id === founderCouponId;
+              });
+              if (hasFounderCoupon) {
+                // Idempotency: only grant if bonus is currently 0
+                const { data: sub } = await supabase
+                  .from("subscriptions")
+                  .select("bonus_ai_replies")
+                  .eq("user_id", userId)
+                  .single();
+                if (sub && sub.bonus_ai_replies === 0) {
+                  await supabase
+                    .from("subscriptions")
+                    .update({ bonus_ai_replies: 500 })
+                    .eq("user_id", userId);
+                }
+              }
+            }
           }
         }
         break;

@@ -11,6 +11,7 @@ export interface Subscription {
   cancel_at_period_end: boolean;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  bonus_ai_replies: number;
 }
 
 export interface UsageData {
@@ -31,6 +32,7 @@ const DEFAULT_SUBSCRIPTION: Subscription = {
   cancel_at_period_end: false,
   stripe_customer_id: null,
   stripe_subscription_id: null,
+  bonus_ai_replies: 0,
 };
 
 const EMPTY_USAGE: UsageData = {
@@ -72,6 +74,7 @@ export async function getSubscription(userId: string): Promise<Subscription> {
     cancel_at_period_end: data.cancel_at_period_end,
     stripe_customer_id: data.stripe_customer_id,
     stripe_subscription_id: data.stripe_subscription_id,
+    bonus_ai_replies: data.bonus_ai_replies ?? 0,
   };
 }
 
@@ -116,6 +119,19 @@ export async function incrementUsage(
   });
 }
 
+export async function decrementBonusAiReplies(userId: string, amount: number): Promise<number> {
+  const supabase = createServerClient();
+  const { data, error } = await supabase.rpc("decrement_bonus_ai_replies", {
+    p_user_id: userId,
+    p_amount: amount,
+  });
+  if (error) {
+    console.error("[subscription] Failed to decrement bonus:", error);
+    return 0;
+  }
+  return data ?? 0;
+}
+
 export interface UsageGateResult {
   allowed: boolean;
   error?: string;
@@ -141,30 +157,44 @@ export async function withUsageGating(
   }
 
   const plan = getPlan(subscription.plan_id);
-  const limit = plan.limits[usageField];
+  const planLimit = plan.limits[usageField];
 
   // Unlimited plan
-  if (isUnlimited(limit)) {
+  if (isUnlimited(planLimit)) {
     await incrementUsage(userId, usageField, subscription.current_period_start, subscription.current_period_end, amount);
     return { allowed: true };
   }
+
+  // For ai_replies, include bonus credits in effective limit
+  const bonus = usageField === "ai_replies" ? subscription.bonus_ai_replies : 0;
+  const effectiveLimit = planLimit + bonus;
 
   const usage = await getUsage(userId, subscription.current_period_start);
   const dbColumn = USAGE_DB_COLUMNS[usageField];
   const current = usage[dbColumn];
 
-  if (current + amount > limit) {
+  if (current + amount > effectiveLimit) {
     return {
       allowed: false,
       error: `You've reached your ${plan.name} plan limit for this feature. Upgrade for more.`,
       status: 429,
       current,
-      limit,
+      limit: effectiveLimit,
     };
   }
 
   await incrementUsage(userId, usageField, subscription.current_period_start, subscription.current_period_end, amount);
-  return { allowed: true, current: current + amount, limit };
+
+  // If usage crosses the plan limit, decrement bonus credits
+  const newTotal = current + amount;
+  if (usageField === "ai_replies" && bonus > 0 && newTotal > planLimit) {
+    const bonusUsed = Math.max(0, newTotal - Math.max(current, planLimit));
+    if (bonusUsed > 0) {
+      await decrementBonusAiReplies(userId, bonusUsed);
+    }
+  }
+
+  return { allowed: true, current: newTotal, limit: effectiveLimit };
 }
 
 export function checkFeatureAccess(planId: PlanId, feature: keyof PlanFeatures): boolean {

@@ -37,7 +37,7 @@ function ProgressBar({ used, limit }: { used: number; limit: number }) {
 }
 
 export default function UsagePage() {
-  const { subscription, usage, limits, isLoading } = useSubscription();
+  const { subscription, usage, limits, bonusAiReplies, isLoading } = useSubscription();
 
   const planId = (subscription?.plan_id || "free") as PlanId;
   const plan = PLANS[planId] || PLANS.free;
@@ -114,7 +114,9 @@ export default function UsagePage() {
             const usageKey = USAGE_FIELD_MAP[key] as keyof typeof usage;
             const limitKey = key as keyof typeof limits;
             const used = (usage[usageKey] as number) || 0;
-            const limit = limits[limitKey] as number;
+            const planLimit = limits[limitKey] as number;
+            const bonus = key === "ai_replies" ? bonusAiReplies : 0;
+            const limit = isUnlimited(planLimit) ? planLimit : planLimit + bonus;
             const unlimited = isUnlimited(limit);
             const pct = unlimited ? 0 : limit > 0 ? Math.round((used / limit) * 100) : 0;
             const isExhausted = !unlimited && pct >= 100;
@@ -154,6 +156,9 @@ export default function UsagePage() {
                   </span>
                   <span className="text-[12px] text-content-faint">
                     {unlimited ? "Unlimited" : `${limit.toLocaleString()} limit`}
+                    {bonus > 0 && (
+                      <span className="text-[10px] ml-1">(+{bonus} bonus)</span>
+                    )}
                   </span>
                 </div>
               </div>

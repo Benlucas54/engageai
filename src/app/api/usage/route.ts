@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       usage,
       limits,
       features,
+      bonus_ai_replies: subscription.bonus_ai_replies,
     });
   } catch (err) {
     console.error("[usage] Error:", err);

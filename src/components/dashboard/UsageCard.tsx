@@ -46,7 +46,7 @@ function ProgressBar({ used, limit }: { used: number; limit: number }) {
 }
 
 export function UsageCard() {
-  const { usage, limits, subscription, isLoading } = useSubscription();
+  const { usage, limits, subscription, bonusAiReplies, isLoading } = useSubscription();
 
   if (isLoading || !usage || !limits) return null;
 
@@ -73,11 +73,18 @@ export function UsageCard() {
           const usageKey = USAGE_FIELD_MAP[key] as keyof typeof usage;
           const limitKey = key as keyof typeof limits;
           const used = (usage[usageKey] as number) || 0;
-          const limit = limits[limitKey] as number;
+          const planLimit = limits[limitKey] as number;
+          const bonus = key === "ai_replies" ? bonusAiReplies : 0;
+          const limit = isUnlimited(planLimit) ? planLimit : planLimit + bonus;
 
           return (
             <div key={key}>
-              <div className="text-[12px] text-content font-medium mb-1">{label}</div>
+              <div className="text-[12px] text-content font-medium mb-1">
+                {label}
+                {bonus > 0 && (
+                  <span className="text-[10px] text-content-faint font-normal ml-1">+{bonus} bonus</span>
+                )}
+              </div>
               <ProgressBar used={used} limit={limit} />
             </div>
           );

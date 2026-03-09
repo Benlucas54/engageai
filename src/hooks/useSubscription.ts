@@ -26,6 +26,7 @@ interface UseSubscriptionReturn {
   usage: UsageData | null;
   limits: PlanLimits | null;
   features: PlanFeatures | null;
+  bonusAiReplies: number;
   isLoading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
@@ -36,6 +37,7 @@ export function useSubscription(): UseSubscriptionReturn {
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [limits, setLimits] = useState<PlanLimits | null>(null);
   const [features, setFeatures] = useState<PlanFeatures | null>(null);
+  const [bonusAiReplies, setBonusAiReplies] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +57,7 @@ export function useSubscription(): UseSubscriptionReturn {
       setUsage(data.usage);
       setLimits(data.limits);
       setFeatures(data.features);
+      setBonusAiReplies(data.bonus_ai_replies ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -66,5 +69,5 @@ export function useSubscription(): UseSubscriptionReturn {
     fetchData();
   }, [fetchData]);
 
-  return { subscription, usage, limits, features, isLoading, error, refetch: fetchData };
+  return { subscription, usage, limits, features, bonusAiReplies, isLoading, error, refetch: fetchData };
 }
