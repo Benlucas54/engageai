@@ -31,13 +31,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Max 20 comments per call" }, { status: 400 });
     }
 
-    // Usage gating — count each comment in the batch
+    // Require authentication
     const userId = user_id || await getUserFromRequest(req);
-    if (userId) {
-      const gate = await withUsageGating(userId, "comment_tags", comments.length);
-      if (!gate.allowed) {
-        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
-      }
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Usage gating — count each comment in the batch
+    const gate = await withUsageGating(userId, "comment_tags", comments.length);
+    if (!gate.allowed) {
+      return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
     }
 
     const supabase = createServerClient();

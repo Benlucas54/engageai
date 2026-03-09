@@ -32,13 +32,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Usage gating
+    // Require authentication
     const userId = await getUserFromRequest(req);
-    if (userId) {
-      const gate = await withUsageGating(userId, "follower_analyses");
-      if (!gate.allowed) {
-        return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
-      }
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Usage gating
+    const gate = await withUsageGating(userId, "follower_analyses");
+    if (!gate.allowed) {
+      return NextResponse.json({ error: gate.error }, { status: gate.status || 429 });
     }
 
     // Build profile description

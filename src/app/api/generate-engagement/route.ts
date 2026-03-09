@@ -165,16 +165,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Usage gating (shares ai_replies metric)
+    // Require authentication
     const userId = await getUserFromRequest(req);
-    if (userId) {
-      const gate = await withUsageGating(userId, "ai_replies");
-      if (!gate.allowed) {
-        return NextResponse.json(
-          { error: gate.error },
-          { status: gate.status || 429 }
-        );
-      }
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Usage gating (shares ai_replies metric)
+    const gate = await withUsageGating(userId, "ai_replies");
+    if (!gate.allowed) {
+      return NextResponse.json(
+        { error: gate.error },
+        { status: gate.status || 429 }
+      );
     }
 
     const supabase = createServerClient();
