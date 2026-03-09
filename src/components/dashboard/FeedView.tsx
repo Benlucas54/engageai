@@ -70,7 +70,9 @@ export function FeedView() {
               ? `All \u00B7 ${comments.length}`
               : f === "inbox"
                 ? "Inbox"
-                : f;
+                : f === "hidden"
+                  ? "Dismissed"
+                  : f;
           return (
             <button
               key={f}

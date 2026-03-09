@@ -267,13 +267,13 @@ export function FlaggedView() {
               {c.comment_text}
             </p>
 
-            <div className="mb-4">
-              <MiniLabel>Draft reply</MiniLabel>
+            <div className="mb-4 pt-3 border-t border-border">
+              <span className="text-[10px] text-content-faint mb-1 block">Draft reply</span>
               <textarea
                 value={getDraft(c)}
                 onChange={(e) => updateDraft(c.id, e.target.value)}
                 rows={3}
-                className="mt-2 w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content"
+                className="w-full bg-transparent text-content text-[13px] leading-[1.65] resize-y font-sans outline-none p-0 border-none"
               />
             </div>
 

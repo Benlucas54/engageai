@@ -9,6 +9,7 @@ import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
 import { getSupabase } from "@/lib/supabase";
+import { useComments } from "@/hooks/useComments";
 
 const STEP_LABELS: Record<string, { label: string; color: string }> = {
   opening: { label: "Opening page\u2026", color: "text-blue-500" },
@@ -29,11 +30,16 @@ interface CommentCardProps {
 }
 
 export function CommentCard({ comment: c, compact }: CommentCardProps) {
+  const { refetch: refetchComments } = useComments();
   const replyRow = c.replies?.[0];
   const reply = replyRow?.reply_text;
   const isOwnerReply = replyRow?.sent_at && !replyRow?.draft_text;
   const isSent = !!replyRow?.sent_at;
   const sendStep = replyRow?.send_step;
+  const [regenerating, setRegenerating] = useState(false);
+  const [hoveredAction, setHoveredAction] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
   const [editText, setEditText] = useState(reply || "");
   const [saving, setSaving] = useState(false);
@@ -88,6 +94,75 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
     setProfileLoading(false);
   }, [profileOpen, profile, c.platform, c.username]);
 
+  const handleDismiss = useCallback(() => {
+    setDismissed(true);
+    undoTimerRef.current = setTimeout(async () => {
+      await getSupabase()
+        .from("comments")
+        .update({ status: "hidden" } as never)
+        .eq("id", c.id);
+      refetchComments();
+    }, 4000);
+  }, [c.id, refetchComments]);
+
+  const handleUndo = useCallback(() => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setDismissed(false);
+  }, []);
+
+  const handleRestore = useCallback(async () => {
+    await getSupabase()
+      .from("comments")
+      .update({ status: "flagged" } as never)
+      .eq("id", c.id);
+    refetchComments();
+  }, [c.id, refetchComments]);
+
+  const handleRegenerate = useCallback(async () => {
+    setRegenerating(true);
+    try {
+      const res = await fetch("/api/generate-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comment: {
+            platform: c.platform,
+            username: c.username,
+            comment_text: c.comment_text,
+            post_title: c.post_title,
+            post_url: c.post_url,
+            comment_external_id: c.comment_external_id,
+            created_at: c.created_at,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.reply_text) {
+        setEditText(data.reply_text);
+        const sb = getSupabase();
+        if (replyRow) {
+          await sb
+            .from("replies")
+            .update({ draft_text: data.reply_text, reply_text: data.reply_text } as never)
+            .eq("id", replyRow.id);
+        } else {
+          await sb
+            .from("replies")
+            .insert({ comment_id: c.id, draft_text: data.reply_text, reply_text: data.reply_text } as never);
+        }
+        refetchComments();
+      }
+    } catch {
+      // Silently fail
+    } finally {
+      setRegenerating(false);
+    }
+  }, [c, replyRow]);
+
+  const handleView = useCallback(() => {
+    if (c.post_url) window.open(c.post_url, "_blank");
+  }, [c.post_url]);
+
   const handleChange = (text: string) => {
     setEditText(text);
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -100,6 +175,27 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  // Clean up undo timer on unmount
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  if (dismissed) {
+    return (
+      <Card className={`${compact ? "!px-3.5 !py-3" : ""} flex items-center justify-between`}>
+        <span className="text-[12px] text-content-faint">Comment dismissed</span>
+        <button
+          onClick={handleUndo}
+          className="text-[12px] text-content-sub hover:text-content font-medium cursor-pointer bg-transparent border-none underline"
+        >
+          Undo
+        </button>
+      </Card>
+    );
+  }
 
   return (
     <Card className={compact ? "!px-3.5 !py-3" : ""}>
@@ -127,7 +223,7 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
           )}
         </div>
         <div className="flex gap-1.5 items-center shrink-0">
-          <Tag type={c.status}>{c.status === "flagged" ? "inbox" : c.status}</Tag>
+          <Tag type={c.status}>{c.status === "flagged" ? "inbox" : c.status === "hidden" ? "dismissed" : c.status}</Tag>
           <span className="text-[11px] text-content-faint">
             {timeAgo(c.created_at)}
           </span>
@@ -181,31 +277,31 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
         </div>
       )}
       {/* Replied comments that were engaged externally (no reply sent through EngageAI) */}
-      {c.status === "replied" && !isSent && (
-        <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
-          <MiniLabel>Engaged externally</MiniLabel>
-          <p className="mt-1.5 mb-0 text-[12px] text-content-faint italic leading-[1.65]">
+      {c.status === "replied" && !isSent && !reply && (
+        <div className="mt-3 pt-3 border-t border-border">
+          <span className="text-[10px] text-content-faint">Engaged externally</span>
+          <p className="mt-1 mb-0 text-[12px] text-content-faint italic leading-[1.65]">
             Liked
           </p>
         </div>
       )}
-      {/* Inbox comments: show the EngageAI draft reply for editing */}
-      {reply && c.status !== "replied" && !isSent && (
-        <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
-          <div className="flex justify-between items-center">
-            <MiniLabel>EngageAI reply</MiniLabel>
+      {/* Draft reply: editable for any unsent comment with a reply */}
+      {reply && !isSent && (
+        <div className="mt-3 pt-3 border-t border-border">
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-[10px] text-content-faint">Draft reply</span>
             {saving && (
-              <span className="text-[10px] text-content-faint">Saving...</span>
+              <span className="text-[10px] text-content-xfaint">Saving...</span>
             )}
           </div>
           <textarea
             value={editText}
             onChange={(e) => handleChange(e.target.value)}
-            className="mt-1.5 mb-0 w-full text-[13px] text-content-sub leading-[1.65] bg-transparent border-none outline-none resize-y font-sans p-0 min-h-[60px]"
+            className="w-full text-[13px] text-content-sub leading-[1.65] bg-transparent border-none outline-none resize-y font-sans p-0 min-h-[40px]"
             rows={Math.max(2, editText.split("\n").length)}
           />
           {sendStep && sendStep !== "done" && STEP_LABELS[sendStep] && (
-            <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${STEP_LABELS[sendStep].color}`}>
+            <div className={`mt-1 flex items-center gap-1.5 text-[11px] font-medium ${STEP_LABELS[sendStep].color}`}>
               {sendStep !== "error" && (
                 <span className="inline-block w-2.5 h-2.5 rounded-full border-[1.5px] border-current border-t-transparent animate-spin" />
               )}
@@ -215,15 +311,89 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
           )}
         </div>
       )}
-      {/* Sent replies: show the actual reply that was posted */}
+      {/* Sent replies */}
       {reply && isSent && (
-        <div className="mt-3.5 px-3.5 py-3 bg-surface rounded-[7px] border-l-2 border-content-xfaint">
-          <MiniLabel>Your reply</MiniLabel>
-          <p className="mt-1.5 mb-0 text-[13px] text-content-sub leading-[1.65]">
+        <div className="mt-3 pt-3 border-t border-border">
+          <span className="text-[10px] text-content-faint">Your reply</span>
+          <p className="mt-1 mb-0 text-[13px] text-content-sub leading-[1.65]">
             {reply}
           </p>
         </div>
       )}
+      {/* Action icons */}
+      <div className="flex justify-end items-center gap-1 mt-3">
+        {[
+          c.status === "hidden"
+            ? {
+                key: "undo",
+                label: "Undo dismiss",
+                onClick: handleRestore,
+                icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10" />
+                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  </svg>
+                ),
+              }
+            : {
+                key: "dismiss",
+                label: "Dismiss",
+                onClick: handleDismiss,
+                icon: (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                ),
+              },
+          {
+            key: "regenerate",
+            label: regenerating ? "Generating..." : reply ? "Regenerate" : "Generate",
+            onClick: handleRegenerate,
+            disabled: regenerating,
+            icon: regenerating ? (
+              <span className="inline-block w-3.5 h-3.5 rounded-full border-[1.5px] border-current border-t-transparent animate-spin" />
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" />
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" />
+              </svg>
+            ),
+          },
+          {
+            key: "view",
+            label: "View",
+            onClick: handleView,
+            disabled: !c.post_url,
+            icon: (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            ),
+          },
+        ].map((action) => (
+          <div key={action.key} className="relative flex flex-col items-center">
+            {hoveredAction === action.key && (
+              <span className="absolute bottom-full mb-1 text-[10px] text-content-faint whitespace-nowrap select-none">
+                {action.label}
+              </span>
+            )}
+            <button
+              onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+              disabled={"disabled" in action ? action.disabled : false}
+              onMouseEnter={() => setHoveredAction(action.key)}
+              onMouseLeave={() => setHoveredAction(null)}
+              className="p-1.5 rounded-md text-content-faint hover:text-content hover:bg-surface transition-colors cursor-pointer bg-transparent border-none disabled:opacity-30 disabled:cursor-default"
+            >
+              {action.icon}
+            </button>
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }
