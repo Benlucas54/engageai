@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { P_LABEL, PROFILE_COLORS } from "@/lib/constants";
+import { P_LABEL, PROFILE_COLORS, COMING_SOON_PLATFORMS } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { Btn } from "@/components/ui/Btn";
 
@@ -180,27 +180,36 @@ export function OnboardingWizard({
             </p>
 
             <div className="flex flex-col gap-3">
-              {drafts.map((d) => (
+              {drafts.map((d) => {
+                const comingSoon = COMING_SOON_PLATFORMS.has(d.platform);
+                return (
                 <div
                   key={d.platform}
-                  className="flex items-center gap-3.5 bg-surface-card border border-border rounded-[10px] px-[18px] py-3.5"
+                  className={`flex items-center gap-3.5 bg-surface-card border border-border rounded-[10px] px-[18px] py-3.5 ${comingSoon ? "opacity-40" : ""}`}
                 >
                   <Tag type={d.platform}>{P_LABEL[d.platform]}</Tag>
-                  <input
-                    type="text"
-                    placeholder="@username"
-                    value={d.username}
-                    onChange={(e) =>
-                      update(d.platform, { username: e.target.value })
-                    }
-                    className="flex-1 bg-surface border border-border rounded-[7px] px-3 py-[7px] text-content text-[13px] font-sans outline-none focus:border-content"
-                  />
-                  <Toggle
-                    on={d.enabled}
-                    onToggle={() => update(d.platform, { enabled: !d.enabled })}
-                  />
+                  {comingSoon ? (
+                    <span className="flex-1 text-[12px] text-content-faint italic">Coming soon</span>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="@username"
+                        value={d.username}
+                        onChange={(e) =>
+                          update(d.platform, { username: e.target.value })
+                        }
+                        className="flex-1 bg-surface border border-border rounded-[7px] px-3 py-[7px] text-content text-[13px] font-sans outline-none focus:border-content"
+                      />
+                      <Toggle
+                        on={d.enabled}
+                        onToggle={() => update(d.platform, { enabled: !d.enabled })}
+                      />
+                    </>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="mt-6">

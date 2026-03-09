@@ -5,7 +5,7 @@ import { useLinkedAccounts } from "@/hooks/useLinkedAccounts";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
 import { useVoiceExamples } from "@/hooks/useVoiceExamples";
 import { useVoiceDocuments } from "@/hooks/useVoiceDocuments";
-import { P_LABEL, PROFILE_COLORS } from "@/lib/constants";
+import { P_LABEL, PROFILE_COLORS, COMING_SOON_PLATFORMS } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { Btn } from "@/components/ui/Btn";
 import { Divider } from "@/components/ui/Divider";
@@ -326,36 +326,45 @@ export function ProfileModal({
                   <div className="py-4 text-[12px] text-content-faint">Loading...</div>
                 ) : (
                   <div className="mt-3 flex flex-col">
-                    {local.map((a, i) => (
+                    {local.map((a, i) => {
+                      const comingSoon = COMING_SOON_PLATFORMS.has(a.platform);
+                      return (
                       <div key={a.id}>
-                        <div className="flex items-center gap-3.5 py-3">
+                        <div className={`flex items-center gap-3.5 py-3 ${comingSoon ? "opacity-40" : ""}`}>
                           <div
                             className={`w-[7px] h-[7px] rounded-full shrink-0 ${
-                              a.enabled && a.username.trim()
+                              !comingSoon && a.enabled && a.username.trim()
                                 ? "bg-[#7ab87a]"
                                 : "bg-content-xfaint"
                             }`}
                           />
                           <Tag type={a.platform}>{P_LABEL[a.platform]}</Tag>
-                          <input
-                            type="text"
-                            placeholder="@username"
-                            value={a.username}
-                            onChange={(e) =>
-                              updateAccount(a.id, { username: e.target.value })
-                            }
-                            className="flex-1 bg-surface border border-border rounded-[7px] px-3 py-[7px] text-content text-[13px] font-sans outline-none focus:border-content"
-                          />
-                          <Toggle
-                            on={a.enabled}
-                            onToggle={() =>
-                              updateAccount(a.id, { enabled: !a.enabled })
-                            }
-                          />
+                          {comingSoon ? (
+                            <span className="flex-1 text-[12px] text-content-faint italic">Coming soon</span>
+                          ) : (
+                            <input
+                              type="text"
+                              placeholder="@username"
+                              value={a.username}
+                              onChange={(e) =>
+                                updateAccount(a.id, { username: e.target.value })
+                              }
+                              className="flex-1 bg-surface border border-border rounded-[7px] px-3 py-[7px] text-content text-[13px] font-sans outline-none focus:border-content"
+                            />
+                          )}
+                          {!comingSoon && (
+                            <Toggle
+                              on={a.enabled}
+                              onToggle={() =>
+                                updateAccount(a.id, { enabled: !a.enabled })
+                              }
+                            />
+                          )}
                         </div>
                         {i < local.length - 1 && <Divider />}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

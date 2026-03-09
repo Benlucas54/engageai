@@ -6,7 +6,7 @@ import Link from "next/link";
 import { getSupabase } from "@/lib/supabase";
 import { Card } from "@/components/ui/Card";
 import { Tag } from "@/components/ui/Tag";
-import { P_LABEL } from "@/lib/constants";
+import { P_LABEL, COMING_SOON_PLATFORMS } from "@/lib/constants";
 
 const FEATURES = [
   {
@@ -191,9 +191,14 @@ export default function LandingPage() {
         </p>
         <div className="flex flex-wrap justify-center gap-2 mt-5">
           {PLATFORMS.map(([key, label]) => (
-            <Tag key={key} type={key}>
-              {label}
-            </Tag>
+            <span key={key} className={COMING_SOON_PLATFORMS.has(key) ? "opacity-40 relative" : ""}>
+              <Tag type={key}>
+                {label}
+              </Tag>
+              {COMING_SOON_PLATFORMS.has(key) && (
+                <span className="text-[9px] text-content-faint italic ml-1">soon</span>
+              )}
+            </span>
           ))}
         </div>
       </section>

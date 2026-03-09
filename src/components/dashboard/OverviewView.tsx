@@ -26,7 +26,7 @@ export function OverviewView() {
   const todayISO = todayStart.toISOString();
   const todayComments = comments.filter((c) => c.synced_at >= todayISO || c.created_at >= todayISO);
 
-  const platforms = (["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const).map((p) => {
+  const platforms = (["instagram", "threads", "tiktok"] as const).map((p) => {
     const total = todayComments.filter((c) => c.platform === p).length;
     const replied = todayComments.filter(
       (c) => c.platform === p && c.replies?.some((r) => r.sent_at)
