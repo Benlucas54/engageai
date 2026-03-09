@@ -169,7 +169,7 @@ export default function BetaLandingPage() {
       <section className="border-y border-border-light">
         <div className="max-w-[1080px] mx-auto px-6 lg:px-12 py-8 grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
           {[
-            { value: 6, suffix: "", label: "platforms", sub: "One inbox. Every platform." },
+            { value: 3, suffix: "+", label: "platforms", sub: "Instagram, Threads & TikTok — more coming soon." },
             { value: 1000, suffix: "+", label: "comments/day", sub: "Synced, tagged, and ready to reply." },
             { value: 100, suffix: "%", label: "your voice", sub: "Not generic. Not robotic. You." },
           ].map((s) => (
@@ -225,7 +225,7 @@ export default function BetaLandingPage() {
             { title: "Voice cloning", hint: "It writes like you because it learned from you." },
             { title: "Smart triage", hint: "AI knows which comments actually matter." },
             { title: "Automation rules", hint: "Set rules for which comments get auto-drafted, flagged, or skipped." },
-            { title: "Every platform", hint: "Instagram, Threads, X, LinkedIn, TikTok, YouTube." },
+            { title: "Growing platform support", hint: "Instagram, Threads & TikTok today — X, LinkedIn & YouTube coming soon." },
           ].map((f, i) => (
             <div key={f.title} className="animate-fade-up" style={{ animationDelay: `${0.1 * i}s` }}>
               <Card className="h-full">
@@ -278,7 +278,7 @@ export default function BetaLandingPage() {
           <Card>
             <Eyebrow>Founding member price</Eyebrow>
             <div className="mt-3 flex items-baseline justify-center gap-1">
-              <span className="font-display text-[48px] tracking-[-0.03em] text-content leading-none">$9</span>
+              <span className="font-display text-[48px] tracking-[-0.03em] text-content leading-none">£9</span>
               <span className="text-[14px] text-content-sub">/month</span>
             </div>
             <p className="text-[12px] text-content-faint mt-1">Locked forever for early testers</p>

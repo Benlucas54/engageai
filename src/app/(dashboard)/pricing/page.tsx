@@ -264,7 +264,7 @@ function EnterpriseSection() {
         <div className="mt-8 bg-surface border border-border rounded-xl p-6 text-center">
           <p className="text-[12px] text-content-sub">Estimated monthly cost</p>
           <p className="text-3xl font-bold text-content mt-1">
-            ~${Math.round(estimated)}<span className="text-[14px] text-content-sub font-normal">/mo</span>
+            ~£{Math.round(estimated)}<span className="text-[14px] text-content-sub font-normal">/mo</span>
           </p>
           <p className="text-[11px] text-content-faint mt-1">
             Final pricing confirmed after consultation
