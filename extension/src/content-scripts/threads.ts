@@ -174,6 +174,7 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
       const isNonReply =
         /suggested thread/i.test(fullText) ||
         /picked for you/i.test(fullText) ||
+        /follow suggestion/i.test(fullText) ||
         /because you follow/i.test(fullText) ||
         /followed from your post/i.test(fullText) ||
         /and \d+ others?/i.test(fullText);
@@ -203,6 +204,7 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
         !/followed/i.test(t) &&
         !/^commented on/i.test(t) &&
         !/^quoted your/i.test(t) &&
+        !/^follow suggestion/i.test(t) &&
         !/\band \d+ others?\b/i.test(t)
       ) {
         texts.push(t);
