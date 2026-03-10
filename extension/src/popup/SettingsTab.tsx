@@ -11,7 +11,7 @@ const TAG_COLORS: Record<string, { bg: string; text: string; border: string }> =
   youtube: { bg: "#fdf0f0", text: "#8c2020", border: "#f0c5c5" },
 };
 
-const COMING_SOON = new Set(["x", "linkedin", "youtube"]);
+const COMING_SOON = new Set(["x", "youtube"]);
 
 const P_LABEL: Record<string, string> = {
   instagram: "Instagram",
@@ -132,8 +132,8 @@ export default function SettingsTab() {
     );
   }
 
-  const activePlatforms: Platform[] = ["instagram", "threads", "tiktok"];
-  const comingSoonPlatforms: Platform[] = ["x", "linkedin", "youtube"];
+  const activePlatforms: Platform[] = ["instagram", "threads", "tiktok", "linkedin"];
+  const comingSoonPlatforms: Platform[] = ["x", "youtube"];
 
   return (
     <div style={{ padding: "16px" }}>

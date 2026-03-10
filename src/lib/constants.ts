@@ -22,9 +22,9 @@ export const P_LABEL: Record<string, string> = {
   youtube: "YouTube",
 };
 
-export const ACTIVE_PLATFORMS = new Set(["instagram", "threads", "tiktok"]);
+export const ACTIVE_PLATFORMS = new Set(["instagram", "threads", "tiktok", "linkedin"]);
 
-export const COMING_SOON_PLATFORMS = new Set(["x", "linkedin", "youtube"]);
+export const COMING_SOON_PLATFORMS = new Set(["x", "youtube"]);
 
 export const NAV_ITEMS: NavItem[] = [
   { id: "Overview", icon: "\u25CB", href: "/dashboard" },

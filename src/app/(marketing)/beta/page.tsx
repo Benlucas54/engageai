@@ -169,7 +169,7 @@ export default function BetaLandingPage() {
       <section className="border-y border-border-light">
         <div className="max-w-[1080px] mx-auto px-6 lg:px-12 py-8 grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
           {[
-            { value: 3, suffix: "+", label: "platforms", sub: "Instagram, Threads & TikTok — more coming soon." },
+            { value: 4, suffix: "+", label: "platforms", sub: "Instagram, Threads, TikTok & LinkedIn — more coming soon." },
             { value: 1000, suffix: "+", label: "comments/day", sub: "Synced, tagged, and ready to reply." },
             { value: 100, suffix: "%", label: "your voice", sub: "Not generic. Not robotic. You." },
           ].map((s) => (
@@ -225,7 +225,7 @@ export default function BetaLandingPage() {
             { title: "Voice cloning", hint: "It writes like you because it learned from you." },
             { title: "Smart triage", hint: "AI knows which comments actually matter." },
             { title: "Automation rules", hint: "Set rules for which comments get auto-drafted, flagged, or skipped." },
-            { title: "Growing platform support", hint: "Instagram, Threads & TikTok today — X, LinkedIn & YouTube coming soon." },
+            { title: "Growing platform support", hint: "Instagram, Threads, TikTok & LinkedIn today — X & YouTube coming soon." },
           ].map((f, i) => (
             <div key={f.title} className="animate-fade-up" style={{ animationDelay: `${0.1 * i}s` }}>
               <Card className="h-full">

@@ -539,7 +539,7 @@ restoreSession();
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
     settings: {
-      active_platforms: ["instagram", "threads"],
+      active_platforms: ["instagram", "threads", "linkedin"],
       scan_interval_minutes: 5,
     },
     side_panel_enabled: true,
