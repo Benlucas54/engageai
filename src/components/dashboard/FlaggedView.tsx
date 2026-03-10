@@ -188,15 +188,6 @@ export function FlaggedView() {
 
   return (
     <div className="flex flex-col gap-3" ref={containerRef}>
-      {/* Keyboard hint */}
-      {active.length > 0 && (
-        <div className="text-[10px] text-content-faint flex gap-3">
-          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">Enter</kbd> Send</span>
-          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">d</kbd> Dismiss</span>
-          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">Tab</kbd> Next</span>
-          <span><kbd className="px-1 py-0.5 bg-surface border border-border rounded text-[9px]">r</kbd> Regenerate</span>
-        </div>
-      )}
 
       {/* Tag filter bar */}
       {hasAnyTags && (
@@ -209,7 +200,7 @@ export function FlaggedView() {
               <button
                 key={t.key}
                 onClick={() => toggleFilter(t.key)}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-[5px] rounded-full text-[11px] font-medium border cursor-pointer transition-opacity ${
+                className={`inline-flex items-center gap-1.5 px-2.5 py-[5px] rounded-full text-[11px] font-medium border-none cursor-pointer transition-opacity ${
                   isActive ? "opacity-100" : activeFilters.size > 0 ? "opacity-40" : "opacity-100"
                 }`}
                 style={{ background: "transparent" }}
@@ -263,32 +254,41 @@ export function FlaggedView() {
               </span>
             </div>
 
-            <p className="mb-5 text-sm text-content leading-[1.65]">
+            <p className="mb-0 text-sm text-content leading-[1.65]">
               {c.comment_text}
             </p>
 
-            <div className="mb-4 pt-3 border-t border-border">
-              <span className="text-[10px] text-content-faint mb-1 block">Draft reply</span>
-              <textarea
-                value={getDraft(c)}
-                onChange={(e) => updateDraft(c.id, e.target.value)}
-                rows={3}
-                className="w-full bg-transparent text-content text-[13px] leading-[1.65] resize-y font-sans outline-none p-0 border-none"
-              />
-            </div>
+            {getDraft(c) && (
+              <p className="mt-2.5 mb-0 text-[13px] text-content-sub leading-[1.65] pl-3 border-l-2 border-border">
+                {getDraft(c)}
+              </p>
+            )}
 
-            <div className="flex gap-2 items-center">
-              <Btn onClick={() => approve(c)}>
-                {copied === c.id ? "Copied!" : "Copy & open"}
-              </Btn>
-              <Btn
-                variant="secondary"
-                onClick={() => regenerate(c)}
-                disabled={regenerating[c.id]}
-              >
-                {regenerating[c.id] ? "Regenerating..." : "Regenerate"}
-              </Btn>
-              <Btn variant="secondary" onClick={() => dismiss(c)}>
+            <div className="flex gap-1.5 items-center mt-3">
+              {getDraft(c) ? (
+                <>
+                  <Btn size="sm" onClick={() => approve(c)}>
+                    {copied === c.id ? "Copied!" : "Copy & open"}
+                  </Btn>
+                  <Btn
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => regenerate(c)}
+                    disabled={regenerating[c.id]}
+                  >
+                    {regenerating[c.id] ? "Regenerating..." : "Regenerate"}
+                  </Btn>
+                </>
+              ) : (
+                <Btn
+                  size="sm"
+                  onClick={() => regenerate(c)}
+                  disabled={regenerating[c.id]}
+                >
+                  {regenerating[c.id] ? "Generating..." : "Generate"}
+                </Btn>
+              )}
+              <Btn size="sm" variant="secondary" onClick={() => dismiss(c)}>
                 Dismiss
               </Btn>
             </div>

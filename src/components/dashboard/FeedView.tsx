@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useComments } from "@/hooks/useComments";
 import { useLinkedAccounts } from "@/hooks/useLinkedAccounts";
 import { useLayout } from "@/contexts/LayoutContext";
@@ -11,7 +11,7 @@ import { CommentCard } from "@/components/dashboard/CommentCard";
 type View = "list" | "columns";
 
 export function FeedView() {
-  const { comments } = useComments();
+  const { comments, refetch: refetchComments } = useComments();
   const { accounts } = useLinkedAccounts();
   const { setWide } = useLayout();
 
@@ -20,6 +20,59 @@ export function FeedView() {
   const [visiblePlatforms, setVisiblePlatforms] = useState<Set<string>>(
     new Set()
   );
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
+  const [restoredIds, setRestoredIds] = useState<Set<string>>(new Set());
+  const dismissedAtRef = useRef<Map<string, number>>(new Map());
+
+  const handleDismiss = useCallback((id: string) => {
+    dismissedAtRef.current.set(id, Date.now());
+    setDismissedIds((prev) => new Set(prev).add(id));
+    setRestoredIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }, []);
+
+  const handleUndoDismiss = useCallback((id: string) => {
+    dismissedAtRef.current.delete(id);
+    setDismissedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }, []);
+
+  const handleRestore = useCallback((id: string) => {
+    setRestoredIds((prev) => new Set(prev).add(id));
+    setDismissedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+  }, []);
+
+  // Clear optimistic dismiss state once server confirms and 3s countdown expires
+  useEffect(() => {
+    if (dismissedIds.size === 0) return;
+    const now = Date.now();
+    const ready = new Set<string>();
+    let earliestDelay = Infinity;
+    for (const id of dismissedIds) {
+      const c = comments.find((c) => c.id === id);
+      if (!c || c.status !== "hidden") continue;
+      const elapsed = now - (dismissedAtRef.current.get(id) ?? 0);
+      if (elapsed >= 3000) {
+        ready.add(id);
+      } else {
+        earliestDelay = Math.min(earliestDelay, 3000 - elapsed);
+      }
+    }
+    if (ready.size > 0) {
+      setDismissedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ready) {
+          next.delete(id);
+          dismissedAtRef.current.delete(id);
+        }
+        return next;
+      });
+    }
+    if (earliestDelay < Infinity) {
+      const timer = setTimeout(() => {
+        setDismissedIds((prev) => new Set(prev)); // trigger re-run
+      }, earliestDelay);
+      return () => clearTimeout(timer);
+    }
+  }, [comments, dismissedIds]);
 
   // Initialize visible platforms from linked accounts
   useEffect(() => {
@@ -36,17 +89,26 @@ export function FeedView() {
     return () => setWide(false);
   }, [view, setWide]);
 
+  // Effective status accounts for optimistic dismiss/restore
+  const effectiveStatus = (c: (typeof comments)[number]) => {
+    if (dismissedIds.has(c.id)) return "hidden";
+    if (restoredIds.has(c.id)) return "flagged";
+    return c.status;
+  };
+
   const filtered =
     filter === "all"
       ? comments
       : filter === "inbox"
         ? comments.filter((c) => {
-            if (c.status !== "flagged" && c.status !== "pending") return false;
+            if (dismissedIds.has(c.id)) return true;
+            const s = effectiveStatus(c);
+            if (s !== "flagged" && s !== "pending") return false;
             if (c.replies?.some((r) => r.sent_at)) return false;
             if (c.replies?.some((r) => r.approved)) return false;
             return true;
           })
-        : comments.filter((c) => c.status === filter);
+        : comments.filter((c) => effectiveStatus(c) === filter);
 
   const togglePlatform = (p: string) => {
     setVisiblePlatforms((prev) => {
@@ -138,7 +200,7 @@ export function FeedView() {
       {view === "list" && (
         <div className="flex flex-col gap-2.5">
           {filtered.map((c) => (
-            <CommentCard key={c.id} comment={c} />
+            <CommentCard key={c.id} comment={c} isDismissed={dismissedIds.has(c.id)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
           ))}
         </div>
       )}
@@ -163,7 +225,7 @@ export function FeedView() {
                     style={{ maxHeight: "calc(100vh - 200px)" }}
                   >
                     {colComments.map((c) => (
-                      <CommentCard key={c.id} comment={c} compact />
+                      <CommentCard key={c.id} comment={c} compact isDismissed={dismissedIds.has(c.id)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
                     ))}
                     {colComments.length === 0 && (
                       <p className="text-[12px] text-content-faint py-4 text-center">

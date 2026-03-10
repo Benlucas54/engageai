@@ -9,7 +9,6 @@ import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
 import { getSupabase } from "@/lib/supabase";
-import { useComments } from "@/hooks/useComments";
 
 const STEP_LABELS: Record<string, { label: string; color: string }> = {
   opening: { label: "Opening page\u2026", color: "text-blue-500" },
@@ -27,10 +26,14 @@ const STEP_LABELS: Record<string, { label: string; color: string }> = {
 interface CommentCardProps {
   comment: Comment;
   compact?: boolean;
+  isDismissed?: boolean;
+  onDismiss?: (id: string) => void;
+  onUndoDismiss?: (id: string) => void;
+  onRestore?: (id: string) => void;
+  onRefetch?: () => void;
 }
 
-export function CommentCard({ comment: c, compact }: CommentCardProps) {
-  const { refetch: refetchComments } = useComments();
+export function CommentCard({ comment: c, compact, isDismissed, onDismiss, onUndoDismiss, onRestore, onRefetch }: CommentCardProps) {
   const replyRow = c.replies?.[0];
   const reply = replyRow?.reply_text;
   const isOwnerReply = replyRow?.sent_at && !replyRow?.draft_text;
@@ -38,38 +41,10 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
   const sendStep = replyRow?.send_step;
   const [regenerating, setRegenerating] = useState(false);
   const [hoveredAction, setHoveredAction] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState(false);
-  const undoTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const [editText, setEditText] = useState(reply || "");
-  const [saving, setSaving] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
   const [profile, setProfile] = useState<CommenterProfile | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
-
-  // Sync local state when prop changes (e.g. realtime update)
-  useEffect(() => {
-    if (reply) setEditText(reply);
-  }, [reply]);
-
-  const saveReply = useCallback(
-    async (text: string) => {
-      if (!replyRow || text === reply) return;
-      setSaving(true);
-      await fetch("/api/replies", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: replyRow.id,
-          reply_text: text,
-          draft_text: text,
-        }),
-      });
-      setSaving(false);
-    },
-    [replyRow, reply]
-  );
 
   const handleUsernameClick = useCallback(async () => {
     if (profileOpen) {
@@ -94,29 +69,35 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
     setProfileLoading(false);
   }, [profileOpen, profile, c.platform, c.username]);
 
-  const handleDismiss = useCallback(() => {
-    setDismissed(true);
-    undoTimerRef.current = setTimeout(async () => {
-      await getSupabase()
-        .from("comments")
-        .update({ status: "hidden" } as never)
-        .eq("id", c.id);
-      refetchComments();
-    }, 4000);
-  }, [c.id, refetchComments]);
+  const handleDismiss = useCallback(async () => {
+    onDismiss?.(c.id);
+    await fetch("/api/comments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, status: "hidden" }),
+    });
+    onRefetch?.();
+  }, [c.id, onRefetch, onDismiss]);
 
-  const handleUndo = useCallback(() => {
-    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    setDismissed(false);
-  }, []);
+  const handleUndo = useCallback(async () => {
+    onUndoDismiss?.(c.id);
+    await fetch("/api/comments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, status: "flagged" }),
+    });
+    onRefetch?.();
+  }, [c.id, onRefetch, onUndoDismiss]);
 
   const handleRestore = useCallback(async () => {
-    await getSupabase()
-      .from("comments")
-      .update({ status: "flagged" } as never)
-      .eq("id", c.id);
-    refetchComments();
-  }, [c.id, refetchComments]);
+    onRestore?.(c.id);
+    await fetch("/api/comments", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, status: "flagged" }),
+    });
+    onRefetch?.();
+  }, [c.id, onRefetch, onRestore]);
 
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true);
@@ -138,7 +119,6 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
       });
       const data = await res.json();
       if (data.reply_text) {
-        setEditText(data.reply_text);
         const sb = getSupabase();
         if (replyRow) {
           await sb
@@ -150,7 +130,7 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
             .from("replies")
             .insert({ comment_id: c.id, draft_text: data.reply_text, reply_text: data.reply_text } as never);
         }
-        refetchComments();
+        onRefetch?.();
       }
     } catch {
       // Silently fail
@@ -163,36 +143,47 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
     if (c.post_url) window.open(c.post_url, "_blank");
   }, [c.post_url]);
 
-  const handleChange = (text: string) => {
-    setEditText(text);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => saveReply(text), 800);
-  };
 
-  // Save on unmount if pending
+  const [countdown, setCountdown] = useState(3);
+  const countdownRef = useRef<ReturnType<typeof setInterval>>(null);
+
   useEffect(() => {
+    if (!isDismissed) {
+      setCountdown(3);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      return;
+    }
+    countdownRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, []);
+  }, [isDismissed]);
 
-  // Clean up undo timer on unmount
-  useEffect(() => {
-    return () => {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-    };
-  }, []);
-
-  if (dismissed) {
+  if (isDismissed) {
     return (
       <Card className={`${compact ? "!px-3.5 !py-3" : ""} flex items-center justify-between`}>
-        <span className="text-[12px] text-content-faint">Comment dismissed</span>
-        <button
-          onClick={handleUndo}
-          className="text-[12px] text-content-sub hover:text-content font-medium cursor-pointer bg-transparent border-none underline"
-        >
-          Undo
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] text-content-faint">Comment dismissed</span>
+          {countdown > 0 && (
+            <span className="text-[11px] text-content-xfaint tabular-nums">{countdown}s</span>
+          )}
+        </div>
+        {countdown > 0 && (
+          <button
+            onClick={handleUndo}
+            className="text-[12px] text-content-sub hover:text-content font-medium cursor-pointer bg-transparent border-none underline"
+          >
+            Undo
+          </button>
+        )}
       </Card>
     );
   }
@@ -285,23 +276,14 @@ export function CommentCard({ comment: c, compact }: CommentCardProps) {
           </p>
         </div>
       )}
-      {/* Draft reply: editable for any unsent comment with a reply */}
+      {/* Draft reply */}
       {reply && !isSent && (
-        <div className="mt-3 pt-3 border-t border-border">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-content-faint">Draft reply</span>
-            {saving && (
-              <span className="text-[10px] text-content-xfaint">Saving...</span>
-            )}
-          </div>
-          <textarea
-            value={editText}
-            onChange={(e) => handleChange(e.target.value)}
-            className="w-full text-[13px] text-content-sub leading-[1.65] bg-transparent border-none outline-none resize-y font-sans p-0 min-h-[40px]"
-            rows={Math.max(2, editText.split("\n").length)}
-          />
+        <div className="mt-2.5">
+          <p className="m-0 text-[13px] text-content-sub leading-[1.65] pl-3 border-l-2 border-border">
+            {reply}
+          </p>
           {sendStep && sendStep !== "done" && STEP_LABELS[sendStep] && (
-            <div className={`mt-1 flex items-center gap-1.5 text-[11px] font-medium ${STEP_LABELS[sendStep].color}`}>
+            <div className={`mt-1.5 flex items-center gap-1.5 text-[11px] font-medium ${STEP_LABELS[sendStep].color}`}>
               {sendStep !== "error" && (
                 <span className="inline-block w-2.5 h-2.5 rounded-full border-[1.5px] border-current border-t-transparent animate-spin" />
               )}
