@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const supabase = createServerClient();
   const status = req.nextUrl.searchParams.get("status");
+  const profileId = req.nextUrl.searchParams.get("profile_id");
 
   let query = supabase
     .from("comments")
@@ -14,6 +15,10 @@ export async function GET(req: NextRequest) {
 
   if (status) {
     query = query.eq("status", status);
+  }
+
+  if (profileId) {
+    query = query.eq("profile_id", profileId);
   }
 
   const { data, error } = await query;

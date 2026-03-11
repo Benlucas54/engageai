@@ -35,6 +35,7 @@ export interface Comment {
   comment_external_id: string;
   status: "pending" | "replied" | "flagged" | "hidden" | "dismissed";
   smart_tag: SmartTag | null;
+  profile_id: string | null;
   created_at: string;
   synced_at: string;
 }

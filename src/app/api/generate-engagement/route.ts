@@ -149,13 +149,15 @@ Never say or do: ${voice.avoid}
 
 export async function POST(req: NextRequest) {
   try {
-    const { platform, postAuthor, postCaption, postUrl, existingComments } =
+    const { platform, postAuthor, postCaption, postUrl, existingComments, mediaType, hashtags } =
       (await req.json()) as {
         platform: string;
         postAuthor: string;
         postCaption: string;
         postUrl: string;
         existingComments: { username: string; text: string }[];
+        mediaType?: string;
+        hashtags?: string[];
       };
 
     if (!platform || !postCaption) {
@@ -223,13 +225,26 @@ export async function POST(req: NextRequest) {
       existingComments || []
     );
 
-    const userMessage = postAuthor
-      ? `Write a comment on this ${platform} post by @${postAuthor}:\n\n"${postCaption}"`
-      : `Write a comment on this ${platform} post:\n\n"${postCaption}"`;
+    const authorLine = postAuthor ? ` by @${postAuthor}` : "";
+    const mediaLine = mediaType ? `\nMedia: ${mediaType}` : "";
+    const topicsLine = hashtags?.length ? `\nTopics: ${hashtags.join(" ")}` : "";
+
+    const userMessage = `Analyze this ${platform} post${authorLine}, then write a comment.
+
+Post: "${postCaption}"${mediaLine}${topicsLine}
+
+<analysis>
+Before writing, briefly consider:
+- What is the core point or story?
+- What unique angle or question could add value?
+- What tone matches this post?
+</analysis>
+
+Now write the comment (text only).`;
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 300,
+      max_tokens: 400,
       system: systemPrompt,
       messages: [
         {
@@ -240,8 +255,10 @@ export async function POST(req: NextRequest) {
     });
 
     const block = response.content[0];
-    const text = block.type === "text" ? block.text : "";
-    const commentText = text
+    const rawText = block.type === "text" ? block.text : "";
+    // Strip any <analysis>...</analysis> block the model may emit
+    const stripped = rawText.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "");
+    const commentText = stripped
       .replace(/^["']|["']$/g, "")
       .replace(/^Comment:\s*/i, "")
       .trim();

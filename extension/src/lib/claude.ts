@@ -9,7 +9,7 @@ const API_URL = import.meta.env.VITE_API_URL;
  * means the in-memory session may be lost. This restores it from
  * chrome.storage.local and refreshes the token if needed.
  */
-async function ensureSession(): Promise<string | null> {
+export async function ensureSession(): Promise<string | null> {
   // Try in-memory session first
   const { data: { session } } = await supabase.auth.getSession();
   if (session?.access_token) {
@@ -177,21 +177,25 @@ export async function tagComments(
     const { data: { user } } = await supabase.auth.getUser();
     const user_id = user?.id;
 
-    const res = await fetch(`${API_URL}/api/tag-comments`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ comments, user_id }),
-    });
-
-    if (!res.ok) {
-      console.error("[EngageAI] Tag API error:", res.status);
-      return {};
-    }
-
-    const { tagged } = await res.json() as { tagged: { id: string; tag: SmartTag }[] };
+    // Batch in chunks of 20 (API limit)
     const map: Record<string, SmartTag> = {};
-    for (const t of tagged) {
-      map[t.id] = t.tag;
+    for (let i = 0; i < comments.length; i += 20) {
+      const batch = comments.slice(i, i + 20);
+      const res = await fetch(`${API_URL}/api/tag-comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ comments: batch, user_id }),
+      });
+
+      if (!res.ok) {
+        console.error("[EngageAI] Tag API error:", res.status);
+        continue;
+      }
+
+      const { tagged } = await res.json() as { tagged: { id: string; tag: SmartTag }[] };
+      for (const t of tagged) {
+        map[t.id] = t.tag;
+      }
     }
     return map;
   } catch (err) {

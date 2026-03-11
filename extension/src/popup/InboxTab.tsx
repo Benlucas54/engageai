@@ -33,7 +33,7 @@ function Tag({ label, color }: { label: string; color: string }) {
 
 type FilterMode = "all" | "suggestions" | "dismissed";
 
-export default function InboxTab() {
+export default function InboxTab({ profileId }: { profileId: string | null }) {
   const [scanning, setScanning] = useState(false);
   const [platform, setPlatform] = useState<Platform | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
@@ -51,7 +51,7 @@ export default function InboxTab() {
     setScanning(true);
     setError(null);
     try {
-      const response = await chrome.runtime.sendMessage({ action: "SCRAPE_CURRENT" });
+      const response = await chrome.runtime.sendMessage({ action: "SCRAPE_CURRENT", profileId });
       if (response.success) {
         setResults(response.results || []);
         setPlatform(response.platform);
@@ -64,11 +64,11 @@ export default function InboxTab() {
       }
     }
     setScanning(false);
-  }, []);
+  }, [profileId]);
 
   // Two-phase load: cached data first, then background scrape
   useEffect(() => {
-    chrome.runtime.sendMessage({ action: "LOAD_CACHED" }, (response) => {
+    chrome.runtime.sendMessage({ action: "LOAD_CACHED", profileId }, (response) => {
       if (response?.success) {
         if (response.results?.length > 0) {
           setResults(response.results);

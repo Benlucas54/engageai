@@ -29,6 +29,7 @@ export const COMING_SOON_PLATFORMS = new Set(["x", "youtube"]);
 export const NAV_ITEMS: NavItem[] = [
   { id: "Overview", icon: "\u25CB", href: "/dashboard" },
   { id: "Inbox",    icon: "\u25C7", href: "/inbox", alert: true },
+  { id: "Outbound", icon: "\u25B7", href: "/outbound" },
   { id: "Feed",        icon: "\u2261",  href: "/feed" },
   { id: "Customers",   icon: "\u25A0",  href: "/customers" },
   { id: "Automations", icon: "\u25E0",  href: "/automations" },
@@ -76,6 +77,11 @@ export const TAG_STYLES: Record<string, string> = {
   actioned:   "bg-tag-replied-bg text-tag-replied-text border border-tag-replied-border",
   dismissed:  "bg-tag-hidden-bg text-tag-hidden-text border border-tag-hidden-border",
   unfollowed: "bg-tag-x-bg text-tag-x-text border border-tag-x-border",
+  // Outbound status styles
+  generated: "bg-tag-purchase-bg text-tag-purchase-text border border-tag-purchase-border",
+  copied:    "bg-tag-replied-bg text-tag-replied-text border border-tag-replied-border",
+  manual:    "bg-tag-question-bg text-tag-question-text border border-tag-question-border",
+  extension: "bg-tag-compliment-bg text-tag-compliment-text border border-tag-compliment-border",
   // Message type styles
   dm:      "bg-tag-purchase-bg text-tag-purchase-text border border-tag-purchase-border",
   comment: "bg-tag-question-bg text-tag-question-text border border-tag-question-border",

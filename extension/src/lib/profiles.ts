@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { ensureSession } from "./claude";
 import type { ScrapedComment, Platform, CommenterProfile } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -85,9 +86,15 @@ export async function updateProfileSummaries(
     }
   }
 
+  const token = await ensureSession();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_URL}/api/summarize-profiles`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ commenters: Array.from(commenters.values()) }),
   });
 

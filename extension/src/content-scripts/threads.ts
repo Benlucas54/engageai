@@ -1,5 +1,6 @@
 import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 import { initSidePanel, updatePanelData } from "./shared/side-panel";
+import { initOutboundOverlay } from "./shared/outbound-overlay";
 
 function parseRelativeTime(text: string): string {
   const match = text.match(/(\d+)\s*(s|m|h|d|w|mo|y)/i);
@@ -177,8 +178,18 @@ function collectActivityCards(ownerUsername: string): ActivityCard[] {
         /follow suggestion/i.test(fullText) ||
         /because you follow/i.test(fullText) ||
         /followed from your post/i.test(fullText) ||
+        /liked your (post|thread|reply)/i.test(fullText) ||
         /and \d+ others?/i.test(fullText);
       if (isNonReply) continue;
+
+      // On the general activity page, only accept cards that have a /post/ link.
+      // Like/reaction notifications show your post text inline without a /post/ link,
+      // whereas reply notifications link to the specific post being replied to.
+      const hasPostLink = !!card.querySelector('a[href*="/post/"]');
+      if (!hasPostLink) {
+        console.log(`[EngageAI] Skip @${username}: no /post/ link (likely a like/reaction)`);
+        continue;
+      }
     }
 
     // Collect meaningful text spans (the actual comment text)
@@ -305,9 +316,14 @@ async function scrollToLoadMore(): Promise<void> {
 }
 
 async function scrape(ownerUsername: string): Promise<ScrapeActivityResult> {
-  if (isActivityPage()) {
+  if (isRepliesTab()) {
+    // Only scrape from the Replies tab — the general activity page mixes in
+    // likes, follows, and other non-reply notifications that are hard to filter.
     await scrollToLoadMore();
     return scrapeActivityPage(ownerUsername);
+  }
+  if (isActivityPage() && !isRepliesTab()) {
+    console.log("[EngageAI] On general activity page — navigate to /activity/replies for comment scraping");
   }
   return { comments: [], engagedComments: [] };
 }
@@ -318,6 +334,61 @@ function delay(ms: number): Promise<void> {
 
 // --- Side panel ---
 initSidePanel();
+
+// --- Outbound overlay ---
+initOutboundOverlay({
+  platform: "threads",
+  postContainerSelector: 'div[data-pressable-container="true"]',
+  getPostData: (container) => {
+    const spans = container.querySelectorAll('span[dir="auto"]');
+    const username = spans[0]?.textContent?.trim().replace("@", "") || "";
+    let caption = "";
+    for (let i = 1; i < spans.length; i++) {
+      const t = spans[i]?.textContent?.trim();
+      if (
+        t && t !== "·" && t !== "Author" &&
+        !/^\d+$/.test(t) && !/^\d+(s|m|h|d|w|mo|y)$/i.test(t) &&
+        !/^(like|reply|repost|share|send)$/i.test(t) && t.length > 1
+      ) {
+        caption = t;
+        break;
+      }
+    }
+    // Find post link
+    const postLink = container.querySelector('a[href*="/post/"]');
+    let postUrl = "";
+    if (postLink?.getAttribute("href")) {
+      postUrl = new URL(postLink.getAttribute("href")!, window.location.origin).href;
+    } else if (window.location.href.includes("/post/")) {
+      postUrl = window.location.href.split("?")[0];
+    }
+    if (!postUrl) return null;
+
+    // Media type detection
+    let mediaType: string | undefined;
+    if (container.querySelector("video")) mediaType = "video";
+    else if (container.querySelector("img")) mediaType = "image";
+
+    // Hashtag extraction
+    const hashtags = caption.match(/#[\w]+/g) || undefined;
+
+    // Existing comments (replies below this post, up to 5)
+    const existingComments: { username: string; text: string }[] = [];
+    const allContainers = document.querySelectorAll('div[data-pressable-container="true"]');
+    let foundSelf = false;
+    for (const el of allContainers) {
+      if (el === container) { foundSelf = true; continue; }
+      if (!foundSelf) continue;
+      if (existingComments.length >= 5) break;
+      const parsed = parseContainer(el);
+      if (parsed && parsed.username !== username) {
+        existingComments.push({ username: parsed.username, text: parsed.text });
+      }
+    }
+
+    return { postUrl, postAuthor: username, postCaption: caption, existingComments, mediaType, hashtags };
+  },
+});
 
 chrome.runtime.onMessage.addListener(
   (

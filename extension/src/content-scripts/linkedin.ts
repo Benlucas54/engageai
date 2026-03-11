@@ -28,16 +28,16 @@ function scrapeNotifications(ownerUsername: string): ScrapedComment[] {
   const headlines = document.querySelectorAll('a[class*="nt-card__headline"]');
   console.log(`[EngageAI] Found ${headlines.length} headline links`);
 
-  // Collect unique parent cards (walk up to find a reasonable container)
+  // Collect unique parent cards — the card is div.nt-card__container
   const seen = new Set<Element>();
   const cards: Element[] = [];
   for (const hl of headlines) {
     let el: Element | null = hl.parentElement;
-    // Walk up a few levels to find the card container
+    // Walk up to find div.nt-card__container (the individual notification card)
     for (let i = 0; i < 8; i++) {
       if (!el) break;
       const cls = el.className || "";
-      if (/nt-card/i.test(cls) && !/(list|container)/i.test(cls)) {
+      if (/nt-card__container/i.test(cls)) {
         break;
       }
       el = el.parentElement;
@@ -54,51 +54,71 @@ function scrapeNotifications(ownerUsername: string): ScrapedComment[] {
   const seenIds = new Set<string>();
 
   for (const card of cards) {
-    // The headline link: a.nt-card__headline contains "<strong>Name</strong> commented on your post."
-    const headline = card.querySelector("a.nt-card__headline");
+    const headline = card.querySelector("a.nt-card__headline") || card.querySelector('a[class*="nt-card__headline"]');
     if (!headline) continue;
 
-    const headlineText = headline.textContent || "";
+    const headlineText = headline.textContent?.replace(/\s+/g, " ").trim() || "";
 
-    // POSITIVE filter: only "commented on your" notifications
-    if (!/commented on your/i.test(headlineText)) continue;
+    // NEGATIVE filter: skip reactions (e.g. "reacted to ... post that mentioned you")
+    if (/reacted to/i.test(headlineText)) continue;
+
+    // POSITIVE filter: "commented on your" OR "mentioned you"
+    const isComment = /commented on your/i.test(headlineText);
+    const isMention = /mentioned you/i.test(headlineText);
+    if (!isComment && !isMention) continue;
 
     // Extract commenter name from <strong> inside the headline
     const strongEl = headline.querySelector("strong");
     const username = strongEl?.textContent?.trim() || "";
-    if (!username) {
-      console.log(`[EngageAI] Skip card: no username. Headline: "${headlineText.slice(0, 80)}"`);
-      continue;
-    }
+    if (!username) continue;
 
     // Skip own comments
     if (ownerUsername && username.toLowerCase() === ownerUsername.toLowerCase()) continue;
 
-    // Extract comment text from the body div below the headline
-    // Structure: div.nt-card__text--2-line-large contains the actual comment
-    const bodyEl = card.querySelector(
-      'div[class*="nt-card__text--2-line"], div[class*="nt-card__text--3-line"]:not(.nt-card__headline *)'
-    );
-    // Fallback: try any div with nt-card__text that's NOT inside the headline
+    // Extract comment/mention text from the card body
     let commentText = "";
-    if (bodyEl && !headline.contains(bodyEl)) {
-      commentText = bodyEl.textContent?.trim() || "";
+
+    // Strategy 1: artdeco-card button/div → first direct child div with comment text
+    const artdecoCard = card.querySelector("button.artdeco-card, div.artdeco-card");
+    if (artdecoCard) {
+      for (const child of artdecoCard.children) {
+        if (child.tagName === "DIV") {
+          // Skip the post body
+          if (/nt-card-content__body/i.test(child.className || "")) continue;
+          const t = child.textContent?.trim() || "";
+          if (t.length > 0 && t.length < 500) {
+            commentText = t;
+            break;
+          }
+        }
+      }
     }
-    // Second fallback: look for siblings of the headline
+
+    // Strategy 2: nt-card__text divs NOT in headline and NOT the post body
     if (!commentText) {
-      const siblings = card.querySelectorAll("div[class*='nt-card__text']");
-      for (const sib of siblings) {
-        if (headline.contains(sib)) continue;
-        const t = sib.textContent?.trim() || "";
-        if (t.length > 1) {
+      const textDivs = card.querySelectorAll('div[class*="nt-card__text"]');
+      for (const div of textDivs) {
+        if (headline.contains(div)) continue;
+        if (/nt-card-content__body/i.test(div.className || "")) continue;
+        if (/nt-card__text--3-line/i.test(div.className || "")) continue;
+        const t = div.textContent?.trim() || "";
+        if (t.length > 0 && t.length < 500) {
           commentText = t;
           break;
         }
       }
     }
 
+    // Strategy 3: For mentions, use the repost body text
+    if (!commentText && isMention) {
+      const bodyTextEl = card.querySelector('div[class*="nt-card-content__body-text"]');
+      if (bodyTextEl) {
+        commentText = bodyTextEl.textContent?.trim() || "";
+      }
+    }
+
     if (!commentText) {
-      console.log(`[EngageAI] Skip ${username}: no comment text found`);
+      console.log(`[EngageAI] Skip ${username}: no comment/mention text found`);
       continue;
     }
 
@@ -128,7 +148,7 @@ function scrapeNotifications(ownerUsername: string): ScrapedComment[] {
       platform: "linkedin",
       username,
       comment_text: commentText,
-      post_title: "LinkedIn Post",
+      post_title: isMention ? "LinkedIn Mention" : "LinkedIn Post",
       post_url: postUrl,
       comment_external_id: extId,
       created_at,
@@ -141,35 +161,56 @@ function scrapeNotifications(ownerUsername: string): ScrapedComment[] {
 
 // --- Post page scraper (existing) ---
 
+function expandComments(): void {
+  // Click "load more comments" / "show previous comments" buttons
+  const loadMoreSelectors = [
+    'button[class*="show-previous"]',
+    'button[class*="comments-comments-list__load-more"]',
+    'button[aria-label*="Load more comments"]',
+    'button[aria-label*="Show previous"]',
+    'button[aria-label*="more comments"]',
+  ];
+  for (const sel of loadMoreSelectors) {
+    const btns = document.querySelectorAll(sel);
+    for (const btn of btns) {
+      (btn as HTMLElement).click();
+    }
+  }
+}
+
 function scrapePostPage(ownerUsername: string): ScrapedComment[] {
   const postUrl = window.location.href.split("?")[0];
 
+  // Try to expand collapsed comments
+  expandComments();
+
   const commentEls = document.querySelectorAll(
-    'article.comments-comment-item, div[class*="comments-comment-item"], div[data-id][class*="comment"]'
+    'article.comments-comment-entity, article.comments-comment-item, div[class*="comments-comment-item"], div[data-id][class*="comment"]'
   );
 
   const comments: ScrapedComment[] = [];
 
   for (const el of commentEls) {
+    // Author name: try multiple selectors for different LinkedIn layouts
     const authorEl = el.querySelector(
-      'a[class*="comment__author"] span, span[class*="hoverable-link-text"] span, a[data-tracking-control-name*="comment"] span'
+      'span.comments-comment-meta__description-title, a[class*="comment__author"] span, span[class*="hoverable-link-text"] span, a[data-tracking-control-name*="comment"] span'
     );
     const username = authorEl?.textContent?.trim() || "";
 
+    // Comment text: try the main content span first, then fallbacks
     const textEl = el.querySelector(
-      'span[class*="comment__text"] span, div[class*="comment__text"] span, span[dir="ltr"]'
+      'span.comments-comment-item__main-content span[dir="ltr"], span[class*="comment__text"] span, div[class*="comment__text"] span, span[dir="ltr"]'
     );
     const text = textEl?.textContent?.trim() || "";
 
     if (!username || !text) continue;
     if (ownerUsername && username.toLowerCase() === ownerUsername.toLowerCase()) continue;
 
-    const timeEl = el.querySelector("time[datetime]");
+    const timeEl = el.querySelector("time[datetime], time");
     let created_at = timeEl?.getAttribute("datetime") || "";
     if (!created_at) {
-      const relEl = el.querySelector('span[class*="time"], time, span.visually-hidden');
-      const relText = relEl?.textContent?.trim() || "";
-      created_at = parseRelativeTime(relText);
+      const relText = timeEl?.textContent?.trim() || "";
+      created_at = relText ? parseRelativeTime(relText) : new Date().toISOString();
     }
 
     comments.push({
@@ -209,6 +250,8 @@ async function scrape(ownerUsername: string): Promise<{ comments: ScrapedComment
     return { comments, engagedComments: [] };
   }
   if (isPostPage()) {
+    expandComments();
+    await delay(1000);
     const comments = scrapePostPage(ownerUsername);
     return { comments, engagedComments: [] };
   }
@@ -716,17 +759,19 @@ chrome.runtime.onMessage.addListener(
       if (isNotificationsPage()) {
         const headlines = document.querySelectorAll('a[class*="nt-card__headline"]');
         for (const hl of headlines) {
-          // Walk up to find the card container
+          // Walk up to find div.nt-card__container
           let card: Element | null = hl.parentElement;
           for (let i = 0; i < 8; i++) {
             if (!card) break;
             const cls = card.className || "";
-            if (/nt-card/i.test(cls) && !/(list|container)/i.test(cls)) break;
+            if (/nt-card__container/i.test(cls)) break;
             card = card.parentElement;
           }
           if (!card) card = hl.parentElement;
           if (!card) continue;
           const text = card.textContent || "";
+          // Skip reaction cards — they contain the mentioned user's name but aren't the actual comment
+          if (/reacted to/i.test(text)) continue;
           if (text.includes(username) && text.includes(textPrefix)) {
             card.scrollIntoView({ behavior: "smooth", block: "center" });
             const htmlEl = card as HTMLElement;

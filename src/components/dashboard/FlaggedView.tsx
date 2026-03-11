@@ -4,10 +4,13 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { getSupabase } from "@/lib/supabase";
 import { useComments } from "@/hooks/useComments";
 import { useSmartTags } from "@/hooks/useSmartTags";
+import { useProfiles } from "@/hooks/useProfiles";
+import { buildPlatformProfileMap, buildProfileIdMap, resolveProfileBadge } from "@/lib/profileLookup";
 import { P_LABEL } from "@/lib/constants";
 import { timeAgo } from "@/utils/timeAgo";
 import { Tag } from "@/components/ui/Tag";
 import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
+import { ProfileBadge } from "@/components/ui/ProfileBadge";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
@@ -24,6 +27,9 @@ function responseAge(createdAt: string): { label: string; urgent: boolean } {
 export function FlaggedView() {
   const { comments, refetch: refetchComments } = useComments();
   const { enabledTags, tagLabel, tagColors, tagPriority } = useSmartTags();
+  const { profiles } = useProfiles();
+  const profileMap = useMemo(() => buildPlatformProfileMap(profiles), [profiles]);
+  const profileIdMap = useMemo(() => buildProfileIdMap(profiles), [profiles]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [done, setDone] = useState<FlaggedComment[]>([]);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
@@ -232,6 +238,7 @@ export function FlaggedView() {
       {active.map((c, idx) => {
         const age = responseAge(c.created_at);
         const isSelected = idx === selectedIdx;
+        const badge = resolveProfileBadge(c, profileIdMap, profileMap);
         return (
           <Card
             key={c.id}
@@ -246,6 +253,9 @@ export function FlaggedView() {
                 <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
                 {c.smart_tag && (
                   <SmartTagBadge tagKey={c.smart_tag} />
+                )}
+                {badge && (
+                  <ProfileBadge name={badge.name} color={badge.color} />
                 )}
                 <Tag type="flagged">Inbox</Tag>
               </div>
@@ -300,7 +310,9 @@ export function FlaggedView() {
         <Card>
           <MiniLabel>Sent this session</MiniLabel>
           <div className="mt-4">
-            {done.map((c, i) => (
+            {done.map((c, i) => {
+              const doneBadge = resolveProfileBadge(c, profileIdMap, profileMap);
+              return (
               <div key={c.id}>
                 <div className="flex justify-between items-center py-3">
                   <div className="flex gap-2 items-center">
@@ -308,12 +320,16 @@ export function FlaggedView() {
                       @{c.username}
                     </span>
                     <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>
+                    {doneBadge && (
+                      <ProfileBadge name={doneBadge.name} color={doneBadge.color} />
+                    )}
                   </div>
                   <Tag type="replied">Copied</Tag>
                 </div>
                 {i < done.length - 1 && <Divider />}
               </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}

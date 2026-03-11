@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useComments } from "@/hooks/useComments";
 import { useLinkedAccounts } from "@/hooks/useLinkedAccounts";
+import { useProfiles } from "@/hooks/useProfiles";
 import { useLayout } from "@/contexts/LayoutContext";
+import { buildPlatformProfileMap, buildProfileIdMap, resolveProfileBadge } from "@/lib/profileLookup";
 import { P_LABEL } from "@/lib/constants";
 import { Tag } from "@/components/ui/Tag";
 import { CommentCard } from "@/components/dashboard/CommentCard";
@@ -13,7 +15,11 @@ type View = "list" | "columns";
 export function FeedView() {
   const { comments, refetch: refetchComments } = useComments();
   const { accounts } = useLinkedAccounts();
+  const { profiles } = useProfiles();
   const { setWide } = useLayout();
+
+  const profileMap = useMemo(() => buildPlatformProfileMap(profiles), [profiles]);
+  const profileIdMap = useMemo(() => buildProfileIdMap(profiles), [profiles]);
 
   const [filter, setFilter] = useState("inbox");
   const [view, setView] = useState<View>("list");
@@ -200,7 +206,7 @@ export function FeedView() {
       {view === "list" && (
         <div className="flex flex-col gap-2.5">
           {filtered.map((c) => (
-            <CommentCard key={c.id} comment={c} isDismissed={dismissedIds.has(c.id)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
+            <CommentCard key={c.id} comment={c} isDismissed={dismissedIds.has(c.id)} profileBadge={resolveProfileBadge(c, profileIdMap, profileMap)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
           ))}
         </div>
       )}
@@ -225,7 +231,7 @@ export function FeedView() {
                     style={{ maxHeight: "calc(100vh - 200px)" }}
                   >
                     {colComments.map((c) => (
-                      <CommentCard key={c.id} comment={c} compact isDismissed={dismissedIds.has(c.id)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
+                      <CommentCard key={c.id} comment={c} compact isDismissed={dismissedIds.has(c.id)} profileBadge={resolveProfileBadge(c, profileIdMap, profileMap)} onDismiss={handleDismiss} onUndoDismiss={handleUndoDismiss} onRestore={handleRestore} onRefetch={refetchComments} />
                     ))}
                     {colComments.length === 0 && (
                       <p className="text-[12px] text-content-faint py-4 text-center">

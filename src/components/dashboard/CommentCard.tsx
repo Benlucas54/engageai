@@ -8,6 +8,7 @@ import { Tag } from "@/components/ui/Tag";
 import { SmartTagBadge } from "@/components/ui/SmartTagBadge";
 import { Card } from "@/components/ui/Card";
 import { MiniLabel } from "@/components/ui/MiniLabel";
+import { ProfileBadge } from "@/components/ui/ProfileBadge";
 import { getSupabase } from "@/lib/supabase";
 
 const STEP_LABELS: Record<string, { label: string; color: string }> = {
@@ -27,13 +28,14 @@ interface CommentCardProps {
   comment: Comment;
   compact?: boolean;
   isDismissed?: boolean;
+  profileBadge?: { name: string; color: string } | null;
   onDismiss?: (id: string) => void;
   onUndoDismiss?: (id: string) => void;
   onRestore?: (id: string) => void;
   onRefetch?: () => void;
 }
 
-export function CommentCard({ comment: c, compact, isDismissed, onDismiss, onUndoDismiss, onRestore, onRefetch }: CommentCardProps) {
+export function CommentCard({ comment: c, compact, isDismissed, profileBadge, onDismiss, onUndoDismiss, onRestore, onRefetch }: CommentCardProps) {
   const replyRow = c.replies?.[0];
   const reply = replyRow?.reply_text;
   const isOwnerReply = replyRow?.sent_at && !replyRow?.draft_text;
@@ -206,6 +208,9 @@ export function CommentCard({ comment: c, compact, isDismissed, onDismiss, onUnd
           {!compact && <Tag type={c.platform}>{P_LABEL[c.platform]}</Tag>}
           {!compact && c.smart_tag && (
             <SmartTagBadge tagKey={c.smart_tag} />
+          )}
+          {!compact && profileBadge && (
+            <ProfileBadge name={profileBadge.name} color={profileBadge.color} />
           )}
           {!compact && (
             <span className="text-[11px] text-content-xfaint">

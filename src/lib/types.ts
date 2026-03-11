@@ -23,6 +23,7 @@ export interface Comment {
   comment_external_id: string;
   status: "pending" | "replied" | "flagged" | "hidden";
   smart_tag: SmartTag | null;
+  profile_id: string | null;
   created_at: string;
   synced_at: string;
   replies?: Reply[];
@@ -228,6 +229,26 @@ export interface Customer {
   first_seen_at: string;
   last_interaction_at: string;
   notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type OutboundPostStatus = "pending" | "generated" | "copied" | "dismissed";
+
+export interface OutboundPost {
+  id: string;
+  user_id: string;
+  platform: Comment["platform"];
+  post_url: string;
+  post_author: string | null;
+  post_caption: string | null;
+  source: "manual" | "extension";
+  status: OutboundPostStatus;
+  generated_comment: string | null;
+  generated_at: string | null;
+  existing_comments: { username: string; text: string }[];
+  media_type: string | null;
+  hashtags: string[];
   created_at: string;
   updated_at: string;
 }

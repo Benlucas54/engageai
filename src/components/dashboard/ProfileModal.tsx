@@ -60,7 +60,8 @@ export function ProfileModal({
   const [tab, setTab] = useState<"profile" | "voice">("profile");
 
   // ── Profile tab state ──
-  const { accounts, loading, save: saveAccount } = useLinkedAccounts(profile.id);
+  const { accounts, loading, save: saveAccount, initializeDefaults } = useLinkedAccounts(profile.id);
+  const initializedRef = useRef(false);
   const [local, setLocal] = useState<LinkedAccount[]>([]);
   const [name, setName] = useState(profile.name);
   const [color, setColor] = useState(profile.color);
@@ -100,8 +101,15 @@ export function ProfileModal({
   }, [fetchAllVoices]);
 
   useEffect(() => {
-    if (accounts.length && !local.length) setLocal(accounts);
-  }, [accounts, local.length]);
+    if (loading) return;
+    if (accounts.length) {
+      if (!local.length) setLocal(accounts);
+    } else if (!initializedRef.current) {
+      // No linked accounts exist yet — create defaults for all platforms
+      initializedRef.current = true;
+      initializeDefaults(profile.id);
+    }
+  }, [accounts, loading, local.length, initializeDefaults, profile.id]);
 
   // Sync voice form data when voice hook loads
   useEffect(() => {
@@ -523,10 +531,10 @@ export function ProfileModal({
                   <MiniLabel>Brand voice</MiniLabel>
                   <div className="flex flex-col gap-[18px]">
                     {[
-                      { key: "tone" as const, label: "Tone", hint: "How should replies sound?" },
-                      { key: "phrases" as const, label: "Signature phrases", hint: "Things that feel like you" },
-                      { key: "avoid" as const, label: "Avoid", hint: "What sounds off-brand" },
-                    ].map(({ key, label, hint }, i, arr) => (
+                      { key: "tone" as const, label: "Tone", hint: "How should replies sound?", placeholder: "e.g. Friendly, witty, and conversational. Keep it real but professional." },
+                      { key: "phrases" as const, label: "Signature phrases", hint: "Things that feel like you", placeholder: "e.g. \"Let's go!\", \"Here's the thing…\", \"No cap\"" },
+                      { key: "avoid" as const, label: "Avoid", hint: "What sounds off-brand", placeholder: "e.g. Overly formal language, slang, generic motivational quotes" },
+                    ].map(({ key, label, hint, placeholder }, i, arr) => (
                       <div key={key}>
                         <div className="flex justify-between items-baseline mb-2">
                           <span className="text-[13px] font-medium text-content">{label}</span>
@@ -578,6 +586,7 @@ export function ProfileModal({
                         <textarea
                           value={v[key]}
                           onChange={(e) => updateVoice(key, e.target.value)}
+                          placeholder={placeholder}
                           rows={2}
                           ref={(el) => {
                             if (el) {
@@ -590,7 +599,7 @@ export function ProfileModal({
                             t.style.height = "auto";
                             t.style.height = t.scrollHeight + "px";
                           }}
-                          className="w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content overflow-hidden"
+                          className="w-full bg-surface border border-border rounded-[7px] px-3.5 py-[11px] text-content text-[13px] leading-[1.65] resize-y font-sans outline-none focus:border-content overflow-hidden placeholder:text-content-faint"
                         />
                         {i < arr.length - 1 && <Divider className="mt-[14px]" />}
                       </div>

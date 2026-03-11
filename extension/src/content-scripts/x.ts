@@ -1,5 +1,6 @@
 import type { ScrapedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 import { initSidePanel, updatePanelData } from "./shared/side-panel";
+import { initOutboundOverlay } from "./shared/outbound-overlay";
 
 function scrape(ownerUsername: string): ScrapedComment[] {
   const url = window.location.href;
@@ -48,6 +49,51 @@ function scrape(ownerUsername: string): ScrapedComment[] {
 
 // --- Side panel ---
 initSidePanel();
+
+// --- Outbound overlay ---
+initOutboundOverlay({
+  platform: "x",
+  postContainerSelector: 'article[data-testid="tweet"]',
+  getPostData: (container) => {
+    const userLink = container.querySelector('div[data-testid="User-Name"] a[href*="/"]');
+    const postAuthor = userLink?.getAttribute("href")?.replace("/", "")?.split("/")[0] || "";
+    const textEl = container.querySelector('div[data-testid="tweetText"]');
+    const postCaption = textEl?.textContent?.trim() || "";
+    // Post URL: look for time element's parent link
+    const timeLink = container.querySelector("time")?.closest("a");
+    let postUrl = "";
+    if (timeLink?.getAttribute("href")) {
+      postUrl = new URL(timeLink.getAttribute("href")!, "https://x.com").href;
+    } else if (/x\.com\/\w+\/status\//.test(window.location.href)) {
+      postUrl = window.location.href.split("?")[0];
+    }
+    if (!postUrl) return null;
+
+    // Media type detection
+    let mediaType: string | undefined;
+    if (container.querySelector('[data-testid="videoPlayer"]')) mediaType = "video";
+    else if (container.querySelector('[data-testid="tweetPhoto"]')) mediaType = "image";
+    else if (!postCaption) mediaType = "text";
+
+    // Hashtag extraction
+    const hashtags = postCaption.match(/#[\w]+/g) || undefined;
+
+    // Existing comments (replies visible in thread, up to 5)
+    const existingComments: { username: string; text: string }[] = [];
+    const allTweets = document.querySelectorAll('article[data-testid="tweet"]');
+    let foundSelf = false;
+    for (const tweet of allTweets) {
+      if (tweet === container) { foundSelf = true; continue; }
+      if (!foundSelf) continue;
+      if (existingComments.length >= 5) break;
+      const replyUser = tweet.querySelector('div[data-testid="User-Name"] a[href*="/"]')?.getAttribute("href")?.replace("/", "")?.split("/")[0] || "";
+      const replyText = tweet.querySelector('div[data-testid="tweetText"]')?.textContent?.trim() || "";
+      if (replyUser && replyText) existingComments.push({ username: replyUser, text: replyText });
+    }
+
+    return { postUrl, postAuthor, postCaption, existingComments, mediaType, hashtags };
+  },
+});
 
 chrome.runtime.onMessage.addListener(
   (

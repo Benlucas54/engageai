@@ -1,5 +1,6 @@
 import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 import { initSidePanel, updatePanelData } from "./shared/side-panel";
+import { initOutboundOverlay } from "./shared/outbound-overlay";
 
 function parseRelativeTime(text: string): string {
   const match = text.match(/(\d+)\s*(s|m|h|d|w|mo|y)/i);
@@ -103,7 +104,11 @@ function collectNotificationCards(panel: Element, ownerUsername: string): Notifi
 
     let commentText = afterCommented.slice(1).join(" commented: "); // rejoin in case "commented:" appears in the comment
     // Strip trailing relative timestamp (e.g. "5d", "2h", "1w", "3mo")
-    commentText = commentText.replace(/\s*\d+(s|m|h|d|w|mo|y)\s*$/i, "").trim();
+    // or absolute date (e.g. "03 Mar", "15 February", "1 Jan")
+    commentText = commentText
+      .replace(/\s*\d+(s|m|h|d|w|mo|y)\s*$/i, "")
+      .replace(/\s*\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s*$/i, "")
+      .trim();
 
     if (!commentText) continue;
 
@@ -204,6 +209,60 @@ async function scrape(ownerUsername: string): Promise<ScrapeResult> {
 
 // --- Side panel ---
 initSidePanel();
+
+// --- Outbound overlay ---
+initOutboundOverlay({
+  platform: "instagram",
+  postContainerSelector: 'article[role="presentation"], article',
+  getPostData: (container) => {
+    // Author from header link
+    const authorLink = container.querySelector('a[href^="/"][role="link"] span, header a[href^="/"]');
+    const postAuthor = authorLink?.textContent?.trim().replace("@", "") || "";
+    // Caption text
+    const captionEl = container.querySelector('div[class*="caption"] span, ul li span, h1 + div span');
+    const postCaption = captionEl?.textContent?.trim() || "";
+    // Post URL from <a> with /p/ or /reel/
+    const postLink = container.querySelector('a[href*="/p/"], a[href*="/reel/"]');
+    let postUrl = "";
+    if (postLink?.getAttribute("href")) {
+      postUrl = new URL(postLink.getAttribute("href")!, "https://www.instagram.com").href;
+    } else if (/\/(p|reel)\//.test(window.location.href)) {
+      postUrl = window.location.href.split("?")[0];
+    }
+    if (!postUrl) return null;
+
+    // Media type detection
+    let mediaType: string | undefined;
+    if (container.querySelector("video") || /\/reel\//.test(postUrl)) mediaType = "video";
+    else {
+      const imgs = container.querySelectorAll('img:not([alt=""])');
+      if (imgs.length > 1) mediaType = "carousel";
+      else if (imgs.length === 1) mediaType = "image";
+    }
+
+    // Hashtag extraction
+    const hashtags = postCaption.match(/#[\w]+/g) || undefined;
+
+    // Existing comments (up to 5)
+    const existingComments: { username: string; text: string }[] = [];
+    const commentItems = container.querySelectorAll('ul li, div[role="button"]');
+    for (const item of commentItems) {
+      if (existingComments.length >= 5) break;
+      const userEl = item.querySelector('a[href^="/"] span, a[href^="/"]');
+      const username = userEl?.textContent?.trim().replace("@", "") || "";
+      if (!username || username === postAuthor) continue;
+      const textSpans = item.querySelectorAll("span");
+      let text = "";
+      for (const s of textSpans) {
+        const t = s.textContent?.trim() || "";
+        if (t && t !== username && t.length > 3) { text = t; break; }
+      }
+      if (text) existingComments.push({ username, text });
+    }
+
+    return { postUrl, postAuthor, postCaption, existingComments, mediaType, hashtags };
+  },
+});
 
 chrome.runtime.onMessage.addListener(
   (

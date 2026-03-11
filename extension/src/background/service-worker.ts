@@ -60,23 +60,33 @@ async function deduplicateComments(
   ).toISOString();
   const { data: existing, error: dedupErr } = await supabase
     .from("comments")
-    .select("platform, username, comment_text")
+    .select("platform, username, comment_text, comment_external_id")
+    .in("status", ["pending", "flagged", "replied"])
     .gte("synced_at", thirtyDaysAgo);
 
   console.log(`[EngageAI] Dedup: ${existing?.length ?? 0} existing comments in DB, error:`, dedupErr?.message);
 
-  const existingKeys = new Set(
-    (existing || []).map(
-      (c: { platform: string; username: string; comment_text: string }) =>
-        `${normalizeDedup(c.platform)}:${normalizeDedup(c.username)}:${normalizeDedup(c.comment_text)}`
-    )
-  );
+  // If dedup query failed (e.g. auth expired), skip all inserts to avoid duplicates
+  if (dedupErr) {
+    console.error(`[EngageAI] Dedup query failed, skipping inserts to prevent duplicates`);
+    return [];
+  }
+
+  const existingKeys = new Set<string>();
+  const existingExtIds = new Set<string>();
+  for (const c of (existing || []) as { platform: string; username: string; comment_text: string; comment_external_id?: string }[]) {
+    existingKeys.add(`${normalizeDedup(c.platform)}:${normalizeDedup(c.username)}:${normalizeDedup(c.comment_text)}`);
+    if (c.comment_external_id) existingExtIds.add(c.comment_external_id);
+  }
 
   const seen = new Set<string>();
+  const seenExtIds = new Set<string>();
   return comments.filter((c) => {
     const key = `${normalizeDedup(c.platform)}:${normalizeDedup(c.username)}:${normalizeDedup(c.comment_text)}`;
     if (existingKeys.has(key) || seen.has(key)) return false;
+    if (c.comment_external_id && (existingExtIds.has(c.comment_external_id) || seenExtIds.has(c.comment_external_id))) return false;
     seen.add(key);
+    if (c.comment_external_id) seenExtIds.add(c.comment_external_id);
     return true;
   });
 }
@@ -85,29 +95,43 @@ async function deduplicateComments(
 
 async function handleScrape(
   tabId: number,
-  platform: Platform
+  platform: Platform,
+  activeProfileId?: string | null
 ): Promise<ScanResult[]> {
-  // Look up owner username from linked_accounts
+  // Ensure auth session is active before any DB queries
+  await restoreSession();
+
+  // Look up owner username and profile_id from linked_accounts
+  // If activeProfileId is provided, filter by it to pick the right account
   let ownerUsername = "";
-  const { data: account } = await supabase
+  let profileId: string | null = null;
+
+  let accountQuery = supabase
     .from("linked_accounts")
-    .select("username")
-    .eq("platform", platform === "threads" ? "threads" : platform)
-    .limit(1)
-    .single();
+    .select("username, profile_id")
+    .eq("platform", platform === "threads" ? "threads" : platform);
+  if (activeProfileId) {
+    accountQuery = accountQuery.eq("profile_id", activeProfileId);
+  }
+  const { data: account } = await accountQuery.limit(1).single();
+
   if (account?.username) {
     ownerUsername = account.username.replace(/^@/, "");
+    profileId = account.profile_id ?? null;
   }
   // Fallback: for threads, try instagram account
   if (!ownerUsername && platform === "threads") {
-    const { data: igAccount } = await supabase
+    let igQuery = supabase
       .from("linked_accounts")
-      .select("username")
-      .eq("platform", "instagram")
-      .limit(1)
-      .single();
+      .select("username, profile_id")
+      .eq("platform", "instagram");
+    if (activeProfileId) {
+      igQuery = igQuery.eq("profile_id", activeProfileId);
+    }
+    const { data: igAccount } = await igQuery.limit(1).single();
     if (igAccount?.username) {
       ownerUsername = igAccount.username.replace(/^@/, "");
+      profileId = igAccount.profile_id ?? null;
     }
   }
 
@@ -179,13 +203,15 @@ async function handleScrape(
 
   if (newComments.length === 0) {
     // All comments already in DB — surface only ones from THIS scan that need attention
-    const { data: existing, error: existingErr } = await supabase
+    let existQuery = supabase
       .from("comments")
       .select("*, replies(*)")
       .eq("platform", platform)
       .in("status", ["pending", "flagged"])
       .order("created_at", { ascending: false })
       .limit(100);
+    if (profileId) existQuery = existQuery.eq("profile_id", profileId);
+    const { data: existing, error: existingErr } = await existQuery;
 
     console.log(`[EngageAI] Pending/flagged in DB:`, existing?.length ?? 0, "error:", existingErr?.message);
 
@@ -210,6 +236,7 @@ async function handleScrape(
     if (isSpam(comment.comment_text)) {
       await supabase.from("comments").insert({
         ...comment,
+        profile_id: profileId,
         status: "hidden",
         synced_at: new Date().toISOString(),
       });
@@ -221,6 +248,7 @@ async function handleScrape(
       .from("comments")
       .insert({
         ...comment,
+        profile_id: profileId,
         status: "flagged",
         synced_at: new Date().toISOString(),
       })
@@ -614,13 +642,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       console.log(`[EngageAI] Manual scan: ${platform} tab ${tab.id} — ${tab.url}`);
       try {
-        const newResults = await handleScrape(tab.id, platform);
+        const newResults = await handleScrape(tab.id, platform, message.profileId);
 
-        // Fetch existing comments for this platform
-        const { data: existing } = await supabase
+        // Fetch existing comments for this platform (filtered by profile if provided)
+        let existingQuery = supabase
           .from("comments")
           .select("*, replies(*)")
-          .eq("platform", platform)
+          .eq("platform", platform);
+        if (message.profileId) {
+          existingQuery = existingQuery.eq("profile_id", message.profileId);
+        }
+        const { data: existing } = await existingQuery
           .order("created_at", { ascending: false })
           .limit(50);
 
@@ -654,7 +686,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const tab = tabs[0];
       const platform = tab?.url ? detectPlatform(tab.url) : null;
       try {
-        // Fetch active comments (pending/flagged)
+        // Ensure auth session is active before any DB queries
+        await restoreSession();
+        // Fetch active comments (pending/flagged), filtered by profile if provided
         let query = supabase
           .from("comments")
           .select("*, replies(*)")
@@ -662,6 +696,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           .order("created_at", { ascending: false })
           .limit(50);
         if (platform) query = query.eq("platform", platform);
+        if (message.profileId) query = query.eq("profile_id", message.profileId);
 
         const { data: comments, error } = await query;
         if (error) { sendResponse({ success: false, error: error.message }); return; }
@@ -674,6 +709,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           .order("created_at", { ascending: false })
           .limit(30);
         if (platform) dismissedQuery = dismissedQuery.eq("platform", platform);
+        if (message.profileId) dismissedQuery = dismissedQuery.eq("profile_id", message.profileId);
 
         const { data: dismissedComments } = await dismissedQuery;
 
@@ -746,6 +782,131 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       scheduleScanAlarms();
       sendResponse({ success: true });
     });
+    return true;
+  }
+
+  if (message.action === "CAPTURE_OUTBOUND_POST") {
+    (async () => {
+      try {
+        await restoreSession();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          sendResponse({ success: false, error: "Not authenticated" });
+          return;
+        }
+        const { error } = await supabase
+          .from("outbound_posts")
+          .upsert(
+            {
+              user_id: user.id,
+              platform: message.platform,
+              post_url: message.postUrl,
+              post_author: message.postAuthor || null,
+              post_caption: message.postCaption || null,
+              existing_comments: message.existingComments || [],
+              media_type: message.mediaType || null,
+              hashtags: message.hashtags || [],
+              source: "extension",
+              status: "pending",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,post_url" }
+          );
+        if (error) {
+          console.error("[EngageAI] Outbound capture failed:", error.message);
+          sendResponse({ success: false, error: error.message });
+        } else {
+          console.log(`[EngageAI] Captured outbound post: ${message.postUrl}`);
+          sendResponse({ success: true });
+        }
+      } catch (err) {
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
+    return true;
+  }
+
+  if (message.action === "GENERATE_OUTBOUND_COMMENT") {
+    (async () => {
+      try {
+        await restoreSession();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          sendResponse({ success: false, error: "Not authenticated" });
+          return;
+        }
+
+        // Get access token for API call
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          sendResponse({ success: false, error: "No session" });
+          return;
+        }
+
+        // Step 1: Capture/upsert the outbound post
+        await supabase
+          .from("outbound_posts")
+          .upsert(
+            {
+              user_id: user.id,
+              platform: message.platform,
+              post_url: message.postUrl,
+              post_author: message.postAuthor || null,
+              post_caption: message.postCaption || null,
+              existing_comments: message.existingComments || [],
+              media_type: message.mediaType || null,
+              hashtags: message.hashtags || [],
+              source: "extension",
+              status: "pending",
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,post_url" }
+          );
+
+        // Step 2: Generate comment via API (service worker is not subject to CORS)
+        const apiUrl = import.meta.env.VITE_API_URL || "https://engageai-coral.vercel.app";
+        const res = await fetch(`${apiUrl}/api/generate-engagement`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            platform: message.platform,
+            postAuthor: message.postAuthor || "",
+            postCaption: message.postCaption || "Post",
+            postUrl: message.postUrl,
+            existingComments: message.existingComments || [],
+            mediaType: message.mediaType || null,
+            hashtags: message.hashtags || [],
+          }),
+        });
+
+        const result = await res.json();
+        if (!result.comment_text) {
+          sendResponse({ success: false, error: result.error || "Generation failed" });
+          return;
+        }
+
+        // Step 3: Update the outbound post with generated comment
+        await supabase
+          .from("outbound_posts")
+          .update({
+            generated_comment: result.comment_text,
+            generated_at: new Date().toISOString(),
+            status: "generated",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", user.id)
+          .eq("post_url", message.postUrl);
+
+        console.log(`[EngageAI] Generated outbound comment for: ${message.postUrl}`);
+        sendResponse({ success: true, commentText: result.comment_text });
+      } catch (err) {
+        console.error("[EngageAI] Outbound generation failed:", err);
+        sendResponse({ success: false, error: err instanceof Error ? err.message : "Unknown error" });
+      }
+    })();
     return true;
   }
 

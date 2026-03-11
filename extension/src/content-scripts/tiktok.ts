@@ -1,5 +1,6 @@
 import type { ScrapedComment, EngagedComment, ContentScriptMessage, ContentScriptResponse } from "../lib/types";
 import { initSidePanel, updatePanelData } from "./shared/side-panel";
+import { initOutboundOverlay } from "./shared/outbound-overlay";
 
 function parseRelativeTime(text: string): string {
   // TikTok uses "33s ago", "2h ago", "1d ago", etc.
@@ -150,6 +151,44 @@ async function scrape(ownerUsername: string): Promise<ScrapeResult> {
 
 // --- Side panel ---
 initSidePanel();
+
+// --- Outbound overlay ---
+initOutboundOverlay({
+  platform: "tiktok",
+  postContainerSelector: 'div[data-e2e="recommend-list-item-container"]',
+  getPostData: (container) => {
+    const authorEl = container.querySelector('a[data-e2e="video-author-uniqueid"], a[href^="/@"] span');
+    const postAuthor = authorEl?.textContent?.trim().replace("@", "") || "";
+    const captionEl = container.querySelector('div[data-e2e="video-desc"], div[class*="video-meta-caption"] span');
+    const postCaption = captionEl?.textContent?.trim() || "";
+    const videoLink = container.querySelector('a[href*="/video/"]');
+    let postUrl = "";
+    if (videoLink?.getAttribute("href")) {
+      postUrl = new URL(videoLink.getAttribute("href")!, "https://www.tiktok.com").href;
+    }
+    if (!postUrl) return null;
+
+    // TikTok is always video
+    const mediaType = "video";
+
+    // Hashtag extraction
+    const hashtags = postCaption.match(/#[\w]+/g) || undefined;
+
+    // Existing comments (up to 5)
+    const existingComments: { username: string; text: string }[] = [];
+    const commentItems = container.querySelectorAll('div[data-e2e="comment-item"], div[class*="CommentItemWrapper"]');
+    for (const item of commentItems) {
+      if (existingComments.length >= 5) break;
+      const userEl = item.querySelector('a[data-e2e="comment-username-1"], a[href^="/@"] span');
+      const username = userEl?.textContent?.trim().replace("@", "") || "";
+      const textEl = item.querySelector('p[data-e2e="comment-level-1"], span[data-e2e="comment-level-1"]');
+      const text = textEl?.textContent?.trim() || "";
+      if (username && text) existingComments.push({ username, text });
+    }
+
+    return { postUrl, postAuthor, postCaption, existingComments, mediaType, hashtags };
+  },
+});
 
 chrome.runtime.onMessage.addListener(
   (

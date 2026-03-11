@@ -56,9 +56,19 @@ export function OverviewView() {
     return comments.filter((c) => {
       if (!platformSet.has(c.platform)) return false;
       if (selectedPlatform && c.platform !== selectedPlatform) return false;
+      // Filter by profile: use profile_id if available, fall back to platform-based filtering
+      if (selectedProfile) {
+        if (c.profile_id) {
+          if (c.profile_id !== selectedProfile.id) return false;
+        } else {
+          // Legacy comments without profile_id: check if platform belongs to selected profile
+          const profilePlatforms = new Set(selectedProfile.linked_accounts.filter((a) => a.enabled).map((a) => a.platform));
+          if (!profilePlatforms.has(c.platform)) return false;
+        }
+      }
       return true;
     });
-  }, [comments, availablePlatforms, selectedPlatform]);
+  }, [comments, availablePlatforms, selectedPlatform, selectedProfile]);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
