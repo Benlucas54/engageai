@@ -13,8 +13,8 @@ interface OutboundPostCardProps {
   isSelected: boolean;
   profileBadge?: { name: string; color: string } | null;
   onSelect: () => void;
-  onUpdate: (post: OutboundPost) => void;
-  onDismiss: (post: OutboundPost) => void;
+  onUpdate: (post?: OutboundPost) => void;
+  onDismiss: (post?: OutboundPost) => void;
 }
 
 export function OutboundPostCard({
