@@ -52,6 +52,7 @@ interface OutboundPost {
   source: "manual" | "extension";
   status: "pending" | "generated" | "copied" | "dismissed";
   generated_comment: string | null;
+  generation_analysis: string | null;
   generated_at: string | null;
   created_at: string;
 }
@@ -62,6 +63,7 @@ export default function OutboundTab() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedCaptions, setExpandedCaptions] = useState<Set<string>>(new Set());
+  const [tooltipPostId, setTooltipPostId] = useState<string | null>(null);
 
   function toggleCaption(id: string) {
     setExpandedCaptions((prev) => {
@@ -129,15 +131,6 @@ export default function OutboundTab() {
     await navigator.clipboard.writeText(text).catch(() => {});
     setCopiedId(post.id);
     setTimeout(() => setCopiedId(null), 1500);
-
-    // Open the post URL
-    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.update(tabs[0].id, { url: post.post_url });
-      } else {
-        chrome.tabs.create({ url: post.post_url });
-      }
-    });
 
     // Mark as copied
     await supabase
@@ -312,8 +305,44 @@ export default function OutboundTab() {
                 letterSpacing: "0.05em",
                 marginBottom: "3px",
                 fontWeight: 500,
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
               }}>
                 AI suggestion
+                <span
+                  style={{ position: "relative", display: "inline-flex" }}
+                  onMouseEnter={() => setTooltipPostId(post.id)}
+                  onMouseLeave={() => setTooltipPostId(null)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ cursor: "help" }}>
+                    <circle cx="8" cy="8" r="7" stroke="#78746e" strokeWidth="1.5" />
+                    <text x="8" y="12" textAnchor="middle" fontSize="10" fill="#78746e" fontWeight="600">i</text>
+                  </svg>
+                  {tooltipPostId === post.id && (
+                    <span style={{
+                      position: "absolute",
+                      bottom: "calc(100% + 6px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      width: "240px",
+                      padding: "8px 10px",
+                      backgroundColor: "#1c1917",
+                      color: "#fff",
+                      fontSize: "11px",
+                      fontWeight: 400,
+                      textTransform: "none",
+                      letterSpacing: "normal",
+                      lineHeight: "1.4",
+                      borderRadius: "6px",
+                      pointerEvents: "none",
+                      zIndex: 10,
+                      whiteSpace: "pre-line",
+                    }}>
+                      {post.generation_analysis || "Generated using your voice profile, the post's content, platform conventions, and existing comments to craft an authentic reply."}
+                    </span>
+                  )}
+                </span>
               </p>
               <p style={{ fontSize: "12px", color: "#555", lineHeight: "1.45", margin: 0 }}>
                 {post.generated_comment}
@@ -337,7 +366,7 @@ export default function OutboundTab() {
                   fontFamily: "inherit",
                 }}
               >
-                {copiedId === post.id ? "Copied!" : "Copy & open"}
+                {copiedId === post.id ? "Copied!" : "Copy"}
               </button>
             ) : null}
 

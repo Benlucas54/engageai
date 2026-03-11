@@ -249,12 +249,6 @@ async function scrape(ownerUsername: string): Promise<{ comments: ScrapedComment
     const comments = scrapeNotifications(ownerUsername);
     return { comments, engagedComments: [] };
   }
-  if (isPostPage()) {
-    expandComments();
-    await delay(1000);
-    const comments = scrapePostPage(ownerUsername);
-    return { comments, engagedComments: [] };
-  }
   return { comments: [], engagedComments: [] };
 }
 
@@ -570,31 +564,41 @@ function injectActionBarButton(actionBar: Element): void {
     try { await navigator.clipboard.writeText(data.postUrl); } catch {}
 
     // Route through service worker (avoids CORS issues)
-    chrome.runtime.sendMessage(
-      {
-        action: "GENERATE_OUTBOUND_COMMENT",
-        platform: "linkedin",
-        postUrl: data.postUrl,
-        postAuthor: data.postAuthor,
-        postCaption: data.postCaption,
-        existingComments: data.existingComments || [],
-        mediaType: data.mediaType || null,
-        hashtags: data.hashtags || [],
-      },
-      async (response) => {
-        if (response?.success && response.commentText) {
-          try {
-            await navigator.clipboard.writeText(response.commentText);
-          } catch {}
-          showCommentPopup(btn, response.commentText, data.postUrl);
-          labelSpan.textContent = "Copied!";
-          setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 3000);
-        } else {
-          labelSpan.textContent = response?.error || "Failed";
-          setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 2000);
+    try {
+      chrome.runtime.sendMessage(
+        {
+          action: "GENERATE_OUTBOUND_COMMENT",
+          platform: "linkedin",
+          postUrl: data.postUrl,
+          postAuthor: data.postAuthor,
+          postCaption: data.postCaption,
+          existingComments: data.existingComments || [],
+          mediaType: data.mediaType || null,
+          hashtags: data.hashtags || [],
+        },
+        async (response) => {
+          if (chrome.runtime.lastError) {
+            labelSpan.textContent = "Refresh page";
+            setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 3000);
+            return;
+          }
+          if (response?.success && response.commentText) {
+            try {
+              await navigator.clipboard.writeText(response.commentText);
+            } catch {}
+            showCommentPopup(btn, response.commentText, data.postUrl);
+            labelSpan.textContent = "Copied!";
+            setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 3000);
+          } else {
+            labelSpan.textContent = response?.error || "Failed";
+            setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 2000);
+          }
         }
-      }
-    );
+      );
+    } catch {
+      labelSpan.textContent = "Refresh page";
+      setTimeout(() => { labelSpan.textContent = "EngageAI"; generating = false; }, 3000);
+    }
   });
 }
 

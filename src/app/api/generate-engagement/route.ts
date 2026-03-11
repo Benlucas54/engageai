@@ -233,14 +233,12 @@ export async function POST(req: NextRequest) {
 
 Post: "${postCaption}"${mediaLine}${topicsLine}
 
-<analysis>
-Before writing, briefly consider:
+First, write your analysis inside <analysis> tags. Briefly cover:
 - What is the core point or story?
 - What unique angle or question could add value?
 - What tone matches this post?
-</analysis>
 
-Now write the comment (text only).`;
+Then write the comment text (no quotes, no prefix, just the comment).`;
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
@@ -256,14 +254,16 @@ Now write the comment (text only).`;
 
     const block = response.content[0];
     const rawText = block.type === "text" ? block.text : "";
-    // Strip any <analysis>...</analysis> block the model may emit
-    const stripped = rawText.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "");
-    const commentText = stripped
+    // Extract analysis before stripping it
+    const analysisMatch = rawText.match(/<analysis>([\s\S]*?)<\/analysis>/i);
+    const analysis = analysisMatch?.[1]?.trim() || null;
+    const commentText = rawText
+      .replace(/<analysis>[\s\S]*?<\/analysis>/gi, "")
       .replace(/^["']|["']$/g, "")
       .replace(/^Comment:\s*/i, "")
       .trim();
 
-    return NextResponse.json({ comment_text: commentText });
+    return NextResponse.json({ comment_text: commentText, analysis });
   } catch (err) {
     console.error("[generate-engagement] Error:", err);
     return NextResponse.json(

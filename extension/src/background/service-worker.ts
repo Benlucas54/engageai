@@ -893,6 +893,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           .from("outbound_posts")
           .update({
             generated_comment: result.comment_text,
+            generation_analysis: result.analysis || null,
             generated_at: new Date().toISOString(),
             status: "generated",
             updated_at: new Date().toISOString(),

@@ -71,8 +71,6 @@ export function FollowerInboxView() {
     const draftText = getDraft(f);
     // Copy to clipboard
     try { await navigator.clipboard.writeText(draftText); } catch {}
-    // Open profile link in new tab
-    window.open(profileUrl(f.platform, f.username), "_blank");
     // Mark as approved
     if (f.actionId) {
       await getSupabase()
@@ -289,7 +287,7 @@ export function FollowerInboxView() {
 
             <div className="flex gap-2 items-center">
               <Btn onClick={() => approve(f)}>
-                {copied === f.id ? "Copied!" : `Copy & open`}
+                {copied === f.id ? "Copied!" : "Copy"}
               </Btn>
               <Btn
                 variant="secondary"

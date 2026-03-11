@@ -81,8 +81,6 @@ export function FlaggedView() {
     const draftText = getDraft(c);
     // Copy to clipboard
     try { await navigator.clipboard.writeText(draftText); } catch {}
-    // Open comment link in new tab
-    if (c.post_url) window.open(c.post_url, "_blank");
     // Mark as approved in DB
     if (c.replyId) {
       await getSupabase()
@@ -278,7 +276,7 @@ export function FlaggedView() {
               {getDraft(c) ? (
                 <>
                   <Btn size="sm" onClick={() => approve(c)}>
-                    {copied === c.id ? "Copied!" : "Copy & open"}
+                    {copied === c.id ? "Copied!" : "Copy"}
                   </Btn>
                   <Btn
                     size="sm"

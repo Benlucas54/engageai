@@ -73,12 +73,11 @@ export function OutboundPostCard({
     }
   }
 
-  async function copyAndOpen() {
+  async function copyText() {
     const text = displayComment;
     try {
       await navigator.clipboard.writeText(text);
     } catch {}
-    window.open(post.post_url, "_blank");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     // Update status
@@ -156,8 +155,8 @@ export function OutboundPostCard({
       <div className="flex gap-1.5 items-center mt-3">
         {displayComment ? (
           <>
-            <Btn size="sm" onClick={copyAndOpen}>
-              {copied ? "Copied!" : "Copy & open"}
+            <Btn size="sm" onClick={copyText}>
+              {copied ? "Copied!" : "Copy"}
             </Btn>
             <Btn
               size="sm"
