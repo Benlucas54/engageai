@@ -124,9 +124,13 @@ Adapt your approach based on what the commenter is doing:
 
 async function getVoiceContext(
   supabase: ReturnType<typeof createServerClient>,
+  userId: string,
   voiceId?: string | null
 ) {
-  let voiceQuery = supabase.from("voice_settings").select("*");
+  let voiceQuery = supabase
+    .from("voice_settings")
+    .select("*")
+    .eq("user_id", userId);
   if (voiceId) {
     voiceQuery = voiceQuery.eq("id", voiceId);
   } else {
@@ -135,15 +139,15 @@ async function getVoiceContext(
   const { data: voice } = await voiceQuery.single();
 
   const voiceSettingsId = voice?.id;
+  if (!voiceSettingsId) {
+    return { voice: null, docContext: "", examples: [] };
+  }
 
-  let docsQuery = supabase
+  const { data: docs } = await supabase
     .from("voice_documents")
     .select("extracted_text")
-    .not("extracted_text", "is", null);
-  if (voiceSettingsId) {
-    docsQuery = docsQuery.eq("voice_settings_id", voiceSettingsId);
-  }
-  const { data: docs } = await docsQuery;
+    .not("extracted_text", "is", null)
+    .eq("voice_settings_id", voiceSettingsId);
 
   let docContext =
     docs
@@ -155,15 +159,12 @@ async function getVoiceContext(
     docContext = docContext.slice(0, 3000) + "\n[...truncated]";
   }
 
-  let exQuery = supabase
+  const { data: examples } = await supabase
     .from("voice_examples")
     .select("*")
+    .eq("voice_settings_id", voiceSettingsId)
     .order("created_at", { ascending: false })
     .limit(20);
-  if (voiceSettingsId) {
-    exQuery = exQuery.eq("voice_settings_id", voiceSettingsId);
-  }
-  const { data: examples } = await exQuery;
 
   return {
     voice: voice as VoiceSettings,
@@ -201,28 +202,20 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Look up the profile's voice_id via linked_accounts
+    // Look up the user's profile + linked account for this platform.
     let voiceId: string | null = null;
-    const { data: linkedAccount } = await supabase
-      .from("linked_accounts")
-      .select("profile_id")
-      .eq("platform", comment.platform)
-      .eq("enabled", true)
-      .limit(1)
-      .single();
-
-    if (linkedAccount) {
-      const { data: userProfile } = await supabase
-        .from("profiles")
-        .select("voice_id")
-        .eq("id", linkedAccount.profile_id)
-        .single();
-      if (userProfile?.voice_id) {
-        voiceId = userProfile.voice_id;
-      }
+    const { data: profilesWithLink } = await supabase
+      .from("profiles")
+      .select("voice_id, linked_accounts!inner(platform, enabled)")
+      .eq("user_id", userId)
+      .eq("linked_accounts.platform", comment.platform)
+      .eq("linked_accounts.enabled", true)
+      .limit(1);
+    if (profilesWithLink && profilesWithLink[0]?.voice_id) {
+      voiceId = profilesWithLink[0].voice_id as string;
     }
 
-    const { voice, docContext, examples } = await getVoiceContext(supabase, voiceId);
+    const { voice, docContext, examples } = await getVoiceContext(supabase, userId, voiceId);
 
     if (!voice) {
       return NextResponse.json(

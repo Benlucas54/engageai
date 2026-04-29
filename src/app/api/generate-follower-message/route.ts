@@ -99,28 +99,23 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Look up voice settings via linked_accounts -> profiles -> voice_settings
+    // Look up the user's profile + linked account for this platform.
     let voiceId: string | null = null;
-    const { data: linkedAccount } = await supabase
-      .from("linked_accounts")
-      .select("profile_id")
-      .eq("platform", follower.platform)
-      .eq("enabled", true)
-      .limit(1)
-      .single();
-
-    if (linkedAccount) {
-      const { data: userProfile } = await supabase
-        .from("profiles")
-        .select("voice_id")
-        .eq("id", linkedAccount.profile_id)
-        .single();
-      if (userProfile?.voice_id) {
-        voiceId = userProfile.voice_id;
-      }
+    const { data: profilesWithLink } = await supabase
+      .from("profiles")
+      .select("voice_id, linked_accounts!inner(platform, enabled)")
+      .eq("user_id", userId)
+      .eq("linked_accounts.platform", follower.platform)
+      .eq("linked_accounts.enabled", true)
+      .limit(1);
+    if (profilesWithLink && profilesWithLink[0]?.voice_id) {
+      voiceId = profilesWithLink[0].voice_id as string;
     }
 
-    let voiceQuery = supabase.from("voice_settings").select("*");
+    let voiceQuery = supabase
+      .from("voice_settings")
+      .select("*")
+      .eq("user_id", userId);
     if (voiceId) {
       voiceQuery = voiceQuery.eq("id", voiceId);
     } else {

@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser, getUserFollowerIds } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
   const followerId = searchParams.get("follower_id");
+  const followerIds = await getUserFollowerIds(auth.userId);
+
+  if (followerIds.length === 0) {
+    return NextResponse.json([]);
+  }
 
   let query = supabase
     .from("follower_actions")
@@ -14,7 +23,12 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (followerId) {
+    if (!followerIds.includes(followerId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     query = query.eq("follower_id", followerId);
+  } else {
+    query = query.in("follower_id", followerIds);
   }
 
   const { data, error } = await query;
@@ -26,8 +40,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
+  const followerIds = await getUserFollowerIds(auth.userId);
+
+  if (!followerIds.includes(body.follower_id)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { data, error } = await supabase
     .from("follower_actions")
@@ -51,6 +73,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { id, ...updates } = body;
@@ -59,10 +84,16 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
+  const followerIds = await getUserFollowerIds(auth.userId);
+  if (followerIds.length === 0) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { data, error } = await supabase
     .from("follower_actions")
     .update(updates)
     .eq("id", id)
+    .in("follower_id", followerIds)
     .select()
     .single();
 

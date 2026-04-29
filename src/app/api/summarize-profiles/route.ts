@@ -41,12 +41,19 @@ export async function POST(req: NextRequest) {
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     let updated = 0;
 
+    const { data: userProfileRows } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", userId);
+    const userProfileIds = (userProfileRows ?? []).map((p) => p.id as string);
+
     for (const { platform, username } of commenters) {
       const { data: profile } = await supabase
         .from("commenter_profiles")
         .select("*")
         .eq("platform", platform)
         .eq("username", username)
+        .eq("user_id", userId)
         .limit(1)
         .single();
 
@@ -56,11 +63,14 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      if (userProfileIds.length === 0) continue;
+
       const { data: recentComments } = await supabase
         .from("comments")
         .select("comment_text, post_title, created_at")
         .eq("platform", platform)
         .eq("username", username)
+        .in("profile_id", userProfileIds)
         .order("created_at", { ascending: false })
         .limit(20);
 
@@ -101,7 +111,8 @@ export async function POST(req: NextRequest) {
             topics: parsed.topics || [],
             last_analyzed_at: new Date().toISOString(),
           })
-          .eq("id", profile.id);
+          .eq("id", profile.id)
+          .eq("user_id", userId);
 
         updated++;
       } catch (err) {

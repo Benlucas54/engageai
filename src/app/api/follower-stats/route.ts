@@ -1,28 +1,29 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser, getUserFollowerIds } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const now = new Date();
 
-  // Today start
   const todayStart = new Date(now);
   todayStart.setHours(0, 0, 0, 0);
 
-  // Week start (Monday)
   const weekStart = new Date(now);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay() + (weekStart.getDay() === 0 ? -6 : 1));
   weekStart.setHours(0, 0, 0, 0);
 
-  // Month start
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  // Fetch all followers
   const { data: followers, error: fError } = await supabase
     .from("followers")
     .select("id, platform, first_seen_at, status")
+    .eq("user_id", auth.userId)
     .order("first_seen_at", { ascending: false });
 
   if (fError) {
@@ -31,19 +32,10 @@ export async function GET() {
 
   const all = followers || [];
 
-  const todayCount = all.filter(
-    (f) => new Date(f.first_seen_at) >= todayStart
-  ).length;
+  const todayCount = all.filter((f) => new Date(f.first_seen_at) >= todayStart).length;
+  const weekCount = all.filter((f) => new Date(f.first_seen_at) >= weekStart).length;
+  const monthCount = all.filter((f) => new Date(f.first_seen_at) >= monthStart).length;
 
-  const weekCount = all.filter(
-    (f) => new Date(f.first_seen_at) >= weekStart
-  ).length;
-
-  const monthCount = all.filter(
-    (f) => new Date(f.first_seen_at) >= monthStart
-  ).length;
-
-  // Daily counts for the last 7 days
   const dailyCounts: { date: string; count: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const dayStart = new Date(now);
@@ -63,24 +55,28 @@ export async function GET() {
     });
   }
 
-  // Action stats for today
-  const { data: todayActions } = await supabase
-    .from("follower_actions")
-    .select("message_type, sent_at")
-    .gte("created_at", todayStart.toISOString());
-
+  // Action stats for today (scoped to this user's followers)
+  const followerIds = await getUserFollowerIds(auth.userId);
   let dmsSentToday = 0;
   let commentsSentToday = 0;
-  for (const a of todayActions || []) {
-    if (!a.sent_at) continue;
-    if (a.message_type === "dm") dmsSentToday++;
-    else commentsSentToday++;
+  if (followerIds.length > 0) {
+    const { data: todayActions } = await supabase
+      .from("follower_actions")
+      .select("message_type, sent_at")
+      .in("follower_id", followerIds)
+      .gte("created_at", todayStart.toISOString());
+
+    for (const a of todayActions || []) {
+      if (!a.sent_at) continue;
+      if (a.message_type === "dm") dmsSentToday++;
+      else commentsSentToday++;
+    }
   }
 
-  // Get daily caps from the first active rule (for display)
   const { data: rules } = await supabase
     .from("follower_action_rules")
     .select("daily_dm_cap, daily_comment_cap")
+    .eq("user_id", auth.userId)
     .eq("enabled", true)
     .limit(1);
 
