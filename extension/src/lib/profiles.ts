@@ -23,11 +23,14 @@ export async function upsertProfileCounters(
     }
   }
 
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
   for (const { platform, username, count } of counts.values()) {
-    // Try to fetch existing profile first
     const { data: existing } = await supabase
       .from("commenter_profiles")
       .select("id, comment_count")
+      .eq("user_id", user.id)
       .eq("platform", platform)
       .eq("username", username)
       .limit(1)
@@ -43,6 +46,7 @@ export async function upsertProfileCounters(
         .eq("id", existing.id);
     } else {
       await supabase.from("commenter_profiles").insert({
+        user_id: user.id,
         platform,
         username,
         comment_count: count,
@@ -59,9 +63,13 @@ export async function getCommenterProfile(
   platform: Platform,
   username: string
 ): Promise<CommenterProfile | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
   const { data } = await supabase
     .from("commenter_profiles")
     .select("*")
+    .eq("user_id", user.id)
     .eq("platform", platform)
     .eq("username", username)
     .limit(1)
