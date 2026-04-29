@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseMiddleware } from "@/lib/supabase-middleware";
 
-const ADMIN_USER_ID = "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0";
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -39,28 +37,25 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // TEMPORARY: dashboard is single-tenant until the multi-tenancy fix ships.
-  // Any non-admin user is signed out and redirected to /login.
-  if (user.id !== ADMIN_USER_ID) {
-    await supabase.auth.signOut();
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("error", "unavailable");
-    return NextResponse.redirect(loginUrl);
-  }
-
   return response;
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all routes except:
-     * - / (landing page)
-     * - /v2, /beta, /pricing (marketing pages)
-     * - /login, /auth/callback
-     * - /_next (Next.js internals)
-     * - Static files (favicon, images, etc.)
-     */
-    "/((?!$|v2|beta|login|auth/callback|pricing|_next|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Auth-gated dashboard surface. Marketing pages (/, /v2, /beta, /privacy,
+    // /terms, /cookies, /acceptable-use, /pricing, /login) and /api stay
+    // public; the API routes do their own per-request auth.
+    "/dashboard/:path*",
+    "/inbox/:path*",
+    "/feed/:path*",
+    "/outbound/:path*",
+    "/customers/:path*",
+    "/automations/:path*",
+    "/voice/:path*",
+    "/settings/:path*",
+    "/usage/:path*",
+    "/users/:path*",
+    "/setup/:path*",
+    "/api/:path*",
   ],
 };
