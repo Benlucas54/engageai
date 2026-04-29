@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseMiddleware } from "@/lib/supabase-middleware";
 
+const ADMIN_USER_ID = "9c2e43d4-cdfe-4ebd-9a17-3f75b7348bf0";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -34,6 +36,15 @@ export async function middleware(request: NextRequest) {
 
   if (!user) {
     const loginUrl = new URL("/login", request.url);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // TEMPORARY: dashboard is single-tenant until the multi-tenancy fix ships.
+  // Any non-admin user is signed out and redirected to /login.
+  if (user.id !== ADMIN_USER_ID) {
+    await supabase.auth.signOut();
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("error", "unavailable");
     return NextResponse.redirect(loginUrl);
   }
 
