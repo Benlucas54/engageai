@@ -15,12 +15,20 @@ export default function LoginScreen({ onLogin }: { onLogin: () => void }) {
       email,
       password,
     });
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError(err.message);
-    } else {
-      onLogin();
+      return;
     }
+    // Tell the service worker to pick up the new session — it has its own
+    // Supabase client and won't otherwise know the active user changed.
+    try {
+      await chrome.runtime.sendMessage({ action: "AUTH_SESSION_CHANGED" });
+    } catch (e) {
+      console.warn("[EngageAI] Failed to notify service worker of sign-in:", e);
+    }
+    setLoading(false);
+    onLogin();
   };
 
   return (
