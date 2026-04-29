@@ -18,9 +18,8 @@ interface TagInput {
 
 export async function POST(req: NextRequest) {
   try {
-    const { comments, user_id } = (await req.json()) as {
+    const { comments } = (await req.json()) as {
       comments: TagInput[];
-      user_id?: string;
     };
 
     if (!comments?.length) {
@@ -31,8 +30,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Max 20 comments per call" }, { status: 400 });
     }
 
-    // Require authentication
-    const userId = user_id || await getUserFromRequest(req);
+    // Require authentication — user_id always derives from the session/token,
+    // never from the request body.
+    const userId = await getUserFromRequest(req);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -45,24 +45,21 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Fetch user's enabled smart tags for dynamic classification
     let validKeys: string[] = [];
     let categoryPrompt = "";
 
-    if (user_id) {
-      const { data: tags } = await supabase
-        .from("smart_tags")
-        .select("key, description")
-        .eq("user_id", user_id)
-        .eq("enabled", true)
-        .order("sort_order", { ascending: true });
+    const { data: tags } = await supabase
+      .from("smart_tags")
+      .select("key, description")
+      .eq("user_id", userId)
+      .eq("enabled", true)
+      .order("sort_order", { ascending: true });
 
-      if (tags && tags.length > 0) {
-        validKeys = tags.map((t) => t.key);
-        categoryPrompt = tags
-          .map((t) => `- ${t.key}: ${t.description}`)
-          .join("\n");
-      }
+    if (tags && tags.length > 0) {
+      validKeys = tags.map((t) => t.key);
+      categoryPrompt = tags
+        .map((t) => `- ${t.key}: ${t.description}`)
+        .join("\n");
     }
 
     // Fallback to hardcoded defaults if no user tags found
@@ -119,12 +116,20 @@ Output ONLY the JSON array, no other text.`,
       tag: validSet.has(t.tag) ? t.tag : fallbackKey,
     }));
 
-    // Update comments in Supabase
-    for (const r of results) {
-      await supabase
-        .from("comments")
-        .update({ smart_tag: r.tag })
-        .eq("id", r.id);
+    // Update only this user's comments.
+    const { data: userProfileRows } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", userId);
+    const userProfileIds = (userProfileRows ?? []).map((p) => p.id as string);
+    if (userProfileIds.length > 0) {
+      for (const r of results) {
+        await supabase
+          .from("comments")
+          .update({ smart_tag: r.tag })
+          .eq("id", r.id)
+          .in("profile_id", userProfileIds);
+      }
     }
 
     return NextResponse.json({ tagged: results });

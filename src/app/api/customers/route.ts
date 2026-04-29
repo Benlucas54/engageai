@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser, getUserProfileIds } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
 
@@ -12,10 +16,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "profile_id required" }, { status: 400 });
   }
 
-  let query = supabase
-    .from("customers")
-    .select("*")
-    .eq("profile_id", profileId);
+  const userProfileIds = await getUserProfileIds(auth.userId);
+  if (!userProfileIds.includes(profileId)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let query = supabase.from("customers").select("*").eq("profile_id", profileId);
 
   const status = searchParams.get("status");
   if (status) query = query.eq("status", status);
@@ -45,13 +51,21 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { id, ...updates } = body;
 
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  delete updates.profile_id;
 
-  // If status is being changed, mark as manually set
+  const userProfileIds = await getUserProfileIds(auth.userId);
+  if (userProfileIds.length === 0) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   if (updates.status) {
     updates.status_manually_set = true;
     updates.updated_at = new Date().toISOString();
@@ -61,6 +75,7 @@ export async function PATCH(req: NextRequest) {
     .from("customers")
     .update(updates)
     .eq("id", id)
+    .in("profile_id", userProfileIds)
     .select()
     .single();
 
@@ -69,17 +84,26 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { ids } = body;
 
   if (!ids?.length) return NextResponse.json({ error: "Missing ids" }, { status: 400 });
 
-  const { error } = await supabase
+  const userProfileIds = await getUserProfileIds(auth.userId);
+  if (userProfileIds.length === 0) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { error, count } = await supabase
     .from("customers")
-    .delete()
-    .in("id", ids);
+    .delete({ count: "exact" })
+    .in("id", ids)
+    .in("profile_id", userProfileIds);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ deleted: ids.length });
+  return NextResponse.json({ deleted: count ?? 0 });
 }

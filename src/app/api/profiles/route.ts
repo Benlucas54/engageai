@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/auth";
 
 const PLATFORMS = ["instagram", "threads", "x", "linkedin", "tiktok", "youtube"] as const;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const db = createServerClient();
   const { data, error } = await db
     .from("profiles")
     .select("*, linked_accounts(id, platform, username, enabled)")
+    .eq("user_id", auth.userId)
     .order("created_at");
 
   if (error) {
@@ -18,13 +23,15 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { user_id, name, color, is_default } = await req.json();
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
+  const { name, color, is_default } = await req.json();
   const db = createServerClient();
 
-  // Create a new voice_settings row for this profile
   const { data: voice, error: voiceError } = await db
     .from("voice_settings")
-    .insert({ name: name || "My Brand" })
+    .insert({ name: name || "My Brand", user_id: auth.userId })
     .select()
     .single();
 
@@ -32,11 +39,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: voiceError.message }, { status: 500 });
   }
 
-  // Create the profile with voice_id
   const { data: profile, error: profileError } = await db
     .from("profiles")
     .insert({
-      user_id,
+      user_id: auth.userId,
       name,
       color,
       is_default: is_default ?? false,
@@ -49,7 +55,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
 
-  // Create 6 empty linked_accounts for the new profile
   const accounts = PLATFORMS.map((platform) => ({
     profile_id: profile.id,
     platform,
@@ -65,7 +70,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: accountsError.message }, { status: 500 });
   }
 
-  // Re-fetch the profile with its linked_accounts
   const { data: full, error: fetchError } = await db
     .from("profiles")
     .select("*, linked_accounts(id, platform, username, enabled)")
@@ -80,6 +84,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { id, name, color, voice_id } = await req.json();
   const db = createServerClient();
 
@@ -93,7 +100,8 @@ export async function PUT(req: NextRequest) {
   const { error } = await db
     .from("profiles")
     .update(update)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", auth.userId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -103,25 +111,35 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { id } = await req.json();
   const db = createServerClient();
 
-  // Look up the profile's voice_id before deleting
   const { data: profile } = await db
     .from("profiles")
     .select("voice_id")
     .eq("id", id)
+    .eq("user_id", auth.userId)
     .single();
 
-  const voiceId = profile?.voice_id;
+  if (!profile) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
-  const { error } = await db.from("profiles").delete().eq("id", id);
+  const voiceId = profile.voice_id;
+
+  const { error } = await db
+    .from("profiles")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", auth.userId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // If the profile had a voice, check if any other profiles still use it
   if (voiceId) {
     const { count } = await db
       .from("profiles")
@@ -129,7 +147,11 @@ export async function DELETE(req: NextRequest) {
       .eq("voice_id", voiceId);
 
     if (count === 0) {
-      await db.from("voice_settings").delete().eq("id", voiceId);
+      await db
+        .from("voice_settings")
+        .delete()
+        .eq("id", voiceId)
+        .eq("user_id", auth.userId);
     }
   }
 

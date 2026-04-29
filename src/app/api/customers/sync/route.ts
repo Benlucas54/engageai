@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser, getUserProfileIds } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +8,9 @@ const CHURNED_DAYS = 30;
 const MIN_INTERACTIONS = 2;
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { profile_id } = await req.json();
 
@@ -14,7 +18,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "profile_id required" }, { status: 400 });
   }
 
-  // Get linked accounts for this profile
+  const userProfileIds = await getUserProfileIds(auth.userId);
+  if (!userProfileIds.includes(profile_id)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { data: accounts } = await supabase
     .from("linked_accounts")
     .select("platform, username")
@@ -27,17 +35,17 @@ export async function POST(req: NextRequest) {
 
   const linkedPlatforms = accounts.map((a) => a.platform);
 
-  // Aggregate comments per (platform, username) for linked platforms
+  // Comments scoped to this profile only.
   const { data: comments } = await supabase
     .from("comments")
     .select("platform, username, status, created_at, replies(sent_at)")
+    .eq("profile_id", profile_id)
     .in("platform", linkedPlatforms);
 
   if (!comments) {
     return NextResponse.json({ synced: 0 });
   }
 
-  // Build a map: "platform:username" → aggregated data
   const map = new Map<
     string,
     {
@@ -53,16 +61,13 @@ export async function POST(req: NextRequest) {
   for (const c of comments) {
     const key = `${c.platform}:${c.username}`;
     const existing = map.get(key);
-    const hasReply = (c.replies as { sent_at: string | null }[])?.some(
-      (r) => r.sent_at
-    );
+    const hasReply = (c.replies as { sent_at: string | null }[])?.some((r) => r.sent_at);
 
     if (existing) {
       existing.comment_count += 1;
       if (hasReply) existing.has_reply = true;
       if (c.created_at < existing.first_seen) existing.first_seen = c.created_at;
-      if (c.created_at > existing.last_interaction)
-        existing.last_interaction = c.created_at;
+      if (c.created_at > existing.last_interaction) existing.last_interaction = c.created_at;
     } else {
       map.set(key, {
         platform: c.platform,
@@ -75,10 +80,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Get follower data for these platforms
+  // Followers scoped to this user.
   const { data: followers } = await supabase
     .from("followers")
     .select("platform, username, display_name")
+    .eq("user_id", auth.userId)
     .in("platform", linkedPlatforms);
 
   const followerSet = new Set<string>();
@@ -89,7 +95,6 @@ export async function POST(req: NextRequest) {
       followerSet.add(key);
       if (f.display_name) followerNames.set(key, f.display_name);
 
-      // Followers count as an interaction even without comments
       if (!map.has(key)) {
         map.set(key, {
           platform: f.platform,
@@ -103,11 +108,8 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Filter to candidates with 2+ interactions
   const now = new Date();
-  const churnedCutoff = new Date(
-    now.getTime() - CHURNED_DAYS * 24 * 60 * 60 * 1000
-  );
+  const churnedCutoff = new Date(now.getTime() - CHURNED_DAYS * 24 * 60 * 60 * 1000);
 
   const candidates: {
     profile_id: string;
@@ -127,14 +129,9 @@ export async function POST(req: NextRequest) {
 
     if (interactions < MIN_INTERACTIONS) continue;
 
-    // Determine auto-status
     let status = "new";
-    if (data.has_reply) {
-      status = "engaged";
-    }
-    if (new Date(data.last_interaction) < churnedCutoff) {
-      status = "churned";
-    }
+    if (data.has_reply) status = "engaged";
+    if (new Date(data.last_interaction) < churnedCutoff) status = "churned";
 
     candidates.push({
       profile_id,
@@ -153,7 +150,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ synced: 0 });
   }
 
-  // Get existing customers to check status_manually_set
   const { data: existing } = await supabase
     .from("customers")
     .select("id, platform, username, status_manually_set")
@@ -168,11 +164,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Upsert in batches
   for (const c of candidates) {
     const key = `${c.platform}:${c.username}`;
     if (manuallySet.has(key)) {
-      // Update counts but not status
       await supabase
         .from("customers")
         .update({

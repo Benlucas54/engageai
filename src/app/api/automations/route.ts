@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { data, error } = await supabase
     .from("automation_rules")
     .select("*")
+    .eq("user_id", auth.userId)
     .order("priority", { ascending: false });
 
   if (error) {
@@ -17,12 +22,16 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
 
   const { data, error } = await supabase
     .from("automation_rules")
     .insert({
+      user_id: auth.userId,
       name: body.name,
       keywords: body.keywords,
       match_mode: body.match_mode || "any",
@@ -46,6 +55,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { id, ...updates } = body;
@@ -54,10 +66,14 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
 
+  // Don't allow user_id to be changed
+  delete updates.user_id;
+
   const { data, error } = await supabase
     .from("automation_rules")
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq("id", id)
+    .eq("user_id", auth.userId)
     .select()
     .single();
 
@@ -68,6 +84,9 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
@@ -79,7 +98,8 @@ export async function DELETE(req: NextRequest) {
   const { error } = await supabase
     .from("automation_rules")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", auth.userId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
   const voiceId = searchParams.get("voice_id");
   const all = searchParams.get("all");
 
-  // List all voice_settings rows (for voice selector dropdown)
   if (all === "true") {
     const { data, error } = await supabase
       .from("voice_settings")
       .select("*")
+      .eq("user_id", auth.userId)
       .order("name");
 
     if (error) {
@@ -22,12 +26,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data);
   }
 
-  // Fetch a specific voice_settings row by id
   if (voiceId) {
     const { data, error } = await supabase
       .from("voice_settings")
       .select("*")
       .eq("id", voiceId)
+      .eq("user_id", auth.userId)
       .single();
 
     if (error) {
@@ -36,10 +40,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data);
   }
 
-  // Fallback: fetch the first (singleton) row
   const { data, error } = await supabase
     .from("voice_settings")
     .select("*")
+    .eq("user_id", auth.userId)
     .limit(1)
     .single();
 
@@ -51,6 +55,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { name } = body;
@@ -65,6 +72,7 @@ export async function POST(req: NextRequest) {
       signoff: "",
       auto_threshold: "simple",
       platform_tones: {},
+      user_id: auth.userId,
     })
     .select()
     .single();
@@ -77,6 +85,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const body = await req.json();
   const { id, name, tone, signature_phrases, avoid, signoff, auto_threshold, platform_tones, tag_priorities } = body;
@@ -96,6 +107,7 @@ export async function PUT(req: NextRequest) {
     .from("voice_settings")
     .update(update as never)
     .eq("id", id)
+    .eq("user_id", auth.userId)
     .select()
     .single();
 
@@ -107,10 +119,17 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
+
   const supabase = createServerClient();
   const { id } = await req.json();
 
-  const { error } = await supabase.from("voice_settings").delete().eq("id", id);
+  const { error } = await supabase
+    .from("voice_settings")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", auth.userId);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

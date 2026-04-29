@@ -1,24 +1,23 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase-server";
+import { requireUser } from "@/lib/auth";
 
 export async function POST(req: Request) {
-  try {
-    const { user_id } = await req.json();
-    if (!user_id) {
-      return NextResponse.json({ error: "user_id required" }, { status: 400 });
-    }
+  const auth = await requireUser(req);
+  if (auth instanceof NextResponse) return auth;
 
+  try {
+    const userId = auth.userId;
     const db = createServerClient();
 
-    // 1. Profiles & linked accounts
     const { data: profiles } = await db
       .from("profiles")
       .select("*, linked_accounts(*)")
-      .eq("user_id", user_id);
+      .eq("user_id", userId);
 
-    // 2. Voice settings (via profile voice_ids)
+    const profileIds = (profiles ?? []).map((p) => p.id as string);
     const voiceIds = (profiles ?? [])
-      .map((p: { voice_id: string | null }) => p.voice_id)
+      .map((p) => p.voice_id as string | null)
       .filter(Boolean) as string[];
 
     let voiceSettings: unknown[] = [];
@@ -29,53 +28,70 @@ export async function POST(req: Request) {
       const { data: vs } = await db
         .from("voice_settings")
         .select("*")
-        .in("id", voiceIds);
+        .in("id", voiceIds)
+        .eq("user_id", userId);
       voiceSettings = vs ?? [];
 
       const { data: vd } = await db
         .from("voice_documents")
         .select("*")
-        .in("voice_id", voiceIds);
+        .in("voice_settings_id", voiceIds);
       voiceDocuments = vd ?? [];
 
       const { data: ve } = await db
         .from("voice_examples")
         .select("*")
-        .in("voice_id", voiceIds);
+        .in("voice_settings_id", voiceIds);
       voiceExamples = ve ?? [];
     }
 
-    // 3. Comments & replies (single-tenant)
-    const { data: comments } = await db
-      .from("comments")
-      .select("*, replies(*)");
+    const comments = profileIds.length
+      ? (
+          await db
+            .from("comments")
+            .select("*, replies(*)")
+            .in("profile_id", profileIds)
+        ).data
+      : [];
 
-    // 4. Commenter profiles
     const { data: commenterProfiles } = await db
       .from("commenter_profiles")
-      .select("*");
+      .select("*")
+      .eq("user_id", userId);
 
-    // 5. Automation rules
     const { data: automationRules } = await db
       .from("automation_rules")
-      .select("*");
+      .select("*")
+      .eq("user_id", userId);
 
-    // 6. Followers & follower actions
     const { data: followers } = await db
       .from("followers")
-      .select("*, follower_actions(*)");
+      .select("*, follower_actions(*)")
+      .eq("user_id", userId);
 
-    // 7. Follower action rules
     const { data: followerActionRules } = await db
       .from("follower_action_rules")
-      .select("*");
+      .select("*")
+      .eq("user_id", userId);
 
-    // 8. Agent runs
-    const { data: agentRuns } = await db.from("agent_runs").select("*");
+    const { data: agentRuns } = await db
+      .from("agent_runs")
+      .select("*")
+      .eq("user_id", userId);
+
+    const { data: smartTags } = await db
+      .from("smart_tags")
+      .select("*")
+      .eq("user_id", userId);
+
+    const { data: outboundPosts } = await db
+      .from("outbound_posts")
+      .select("*")
+      .eq("user_id", userId);
 
     const exportData = {
       exported_at: new Date().toISOString(),
-      user_id,
+      user_id: userId,
       profiles: profiles ?? [],
       voice_settings: voiceSettings,
       voice_documents: voiceDocuments,
@@ -86,6 +102,8 @@ export async function POST(req: Request) {
       followers: followers ?? [],
       follower_action_rules: followerActionRules ?? [],
       agent_runs: agentRuns ?? [],
+      smart_tags: smartTags ?? [],
+      outbound_posts: outboundPosts ?? [],
     };
 
     return new Response(JSON.stringify(exportData, null, 2), {
@@ -96,9 +114,6 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("Export error:", err);
-    return NextResponse.json(
-      { error: "Export failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Export failed" }, { status: 500 });
   }
 }
